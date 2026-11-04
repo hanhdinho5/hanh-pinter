@@ -49,3 +49,4 @@ test('extractAvatarUrl trích xuất avatar theo độ ưu tiên', () => {
     const a5 = extractAvatarUrl({});
     assert.equal(a5, null);
 });
+
