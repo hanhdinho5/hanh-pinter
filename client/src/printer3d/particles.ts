@@ -200,3 +200,4 @@ export class SparkleParticleSystem {
         this.material.dispose();
     }
 }
+
