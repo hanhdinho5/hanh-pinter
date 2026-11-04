@@ -39,16 +39,25 @@ Phần lõi chạy hoàn chỉnh, không phụ thuộc TikTok.
 
 ---
 
-### Giai đoạn 2: Máy in 3D (Workshop 9:16 bằng Three.js) - [ĐANG THỰC HIỆN]
-- Dựng workshop tỷ lệ 9:16 (chuẩn dọc OBS 1080x1920) bằng Three.js.
-- Bối cảnh: Phòng workshop ấm cúng với nền gỗ, bàn gỗ, ánh sáng ấm, bóng đổ.
-- Máy in kim loại 3D cách điệu: Thân máy kim loại, trục ray, đầu in (extruder/printhead), khe nhả giấy, đèn LED trạng thái.
-- Tờ giấy: Khổ giấy 6 ô (2 cột x 3 hàng) hoặc 1 ô đặc biệt khi fullPage.
-- Sử dụng mock data để hiển thị trước ảnh avatar, username, khung thường và khung vàng.
+### Giai đoạn 2: Máy in 3D (Workshop 9:16 bằng Three.js) - [HOÀN TẤT]
+- Dựng workshop tỷ lệ 9:16 (chuẩn dọc OBS 1080x1920) bằng Three.js thuần tích hợp React 19.
+- Bối cảnh: Phòng workshop ấm cúng với bàn gỗ mahogany, tường gỗ ván ghép, ánh sáng keylight, spotlight và fill light tạo bóng mềm mại.
+- Máy in kim loại 3D cách điệu: Thân máy kim loại phay xước, ray trượt kép bằng thép, cụm đầu in (printhead carriage, tản nhiệt, vòi phun đồng), khe nhả giấy có con lăn, khay đỡ dốc, đèn LED trạng thái có ánh sáng tỏa và màn hình OLED hiển thị thông tin.
+- Tờ giấy in:
+  - Khổ giấy uốn cong tự nhiên từ khe máy chảy dốc xuống bàn.
+  - Vẽ động bằng HTML5 Canvas Texture độ phân giải cao (1024x1536).
+  - Lưới 6 ô avatar (2 cột x 3 hàng) với ảnh avatar, tên @username, khung thường bạc và khung vàng VIP lấp lánh (quà ≥ 100 kim cương).
+  - Chế độ trang đặc biệt (`kind: 'special'`) cho quà tặng lớn ≥ 1000 kim cương (Full page avatar).
+- Bộ công cụ DevControls:
+  - Chuyển đổi qua lại các bộ dữ liệu mẫu (mockPartialSheet, mockFullSheet, mockSpecialSheet, mockEmptySheet).
+  - Thử nghiệm in thêm avatar vào các slot trống tiếp theo.
+  - Chuyển đổi trạng thái máy in (idle, printing, paused) đồng bộ với đèn LED và màn hình OLED.
+  - Đổi góc nhìn camera (9:16 Stream, Cận cảnh, Toàn cảnh xưởng).
+  - Chuyển đổi chế độ toàn màn hình OBS.
 
 ---
 
-### Giai đoạn 3: Hoạt ảnh & Hiệu ứng (Three.js Animation) - [CHƯA LÀM]
+### Giai đoạn 3: Hoạt ảnh & Hiệu ứng (Three.js Animation) - [TIẾP THEO]
 - Đầu in di chuyển theo trục X/Y trên vị trí ô đang in.
 - Avatar hiện dần theo từng dòng (quét in từ trên xuống dưới / dither print effect).
 - Giấy cuộn/đẩy ra từ khe máy in khi đủ 6 ảnh (hoặc khi đẩy tờ dở).
