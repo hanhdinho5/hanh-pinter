@@ -78,7 +78,22 @@ Phần lõi chạy hoàn chỉnh, không phụ thuộc TikTok.
 
 ---
 
-### Giai đoạn 4: Realtime (Socket.IO Client & Overlay OBS) - [TIẾP THEO]
+### Giai đoạn 4: Realtime (Socket.IO Client & Overlay OBS) - [HOÀN TẤT]
+- Nối client với server qua `socket.io-client` dùng lại type từ `RealtimeEventMap`.
+- Hook `usePrinterSocket`: Lắng nghe và đồng bộ trạng thái `printer:state`, `printer:sheet`, `queue`, `event`.
+- Tự động kích hoạt hoạt ảnh in khi nhận `printer:job:started` (tính đúng thời gian in theo tốc độ máy `(basePrintMs * factor) / speed`).
+- Tự động kích hoạt hoạt ảnh cuộn tờ mới khi nhận `printer:sheet:completed`.
+- Trang riêng cho OBS Browser Source: `/overlay` (chuẩn tỷ lệ 1080×1920, nền sạch, không có thanh điều khiển, sẵn sàng đưa vào OBS).
+- Bổ sung bộ điều khiển Realtime trong `DevControls`:
+  - Hiển thị trạng thái kết nối thời gian thực (`:3001`).
+  - Hiển thị số lượng hàng đợi thời gian thực (`Priority` & `Free`).
+  - Các nút bắn sự kiện giả lập trực tiếp qua REST API: Comment, Follow, Gift 150 kim cương (vàng), Gift 1200 kim cương (Full Page).
+  - Điều khiển pause/resume/tốc độ in trực tiếp tới backend engine.
+  - Nút sao chép đường dẫn `/overlay` cho OBS.
+
+---
+
+### Giai đoạn 5: TikTok LIVE Adapter - [TIẾP THEO]
 - Đầu in di chuyển theo trục X/Y trên vị trí ô đang in.
 - Avatar hiện dần theo từng dòng (quét in từ trên xuống dưới / dither print effect).
 - Giấy cuộn/đẩy ra từ khe máy in khi đủ 6 ảnh (hoặc khi đẩy tờ dở).
