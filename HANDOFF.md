@@ -93,7 +93,26 @@ Phần lõi chạy hoàn chỉnh, không phụ thuộc TikTok.
 
 ---
 
-### Giai đoạn 5: TikTok LIVE Adapter - [TIẾP THEO]
+### Giai đoạn 5: TikTok LIVE Adapter - [HOÀN TẤT]
+- Tích hợp `tiktok-live-connector`: [tiktokAdapter.ts](file:///d:/Projects/ptp-printer/server/src/tiktok/tiktokAdapter.ts).
+- Adapter độc lập, không can thiệp logic nội bộ của máy in:
+  - Lắng nghe các sự kiện `chat`, `follow`, `gift` từ livestream TikTok.
+  - Chuẩn hoá thông tin người dùng: trích xuất chính xác avatar (theo thứ tự ưu tiên các trường CDN của TikTok), `userId`, `username`.
+  - Với combo quà (streak gifts): chỉ gửi job khi chuỗi combo kết thúc để gom thành một vé in hoàn chỉnh với tổng số kim cương.
+  - Chuyển đổi dữ liệu sang `NewEventInput` rồi gọi `handler.handle()`.
+- Xử lý mất kết nối & tự động kết nối lại (Auto Reconnect):
+  - Cơ chế Exponential Backoff (chờ 3s, 6s, 12s, tối đa 30s) lên tới 10 lần thử.
+  - Trạng thái rõ ràng: `disconnected`, `connecting`, `connected`, `reconnecting`.
+- REST API & Realtime Socket:
+  - `POST /api/tiktok/connect`: Kết nối phòng livestream theo username.
+  - `POST /api/tiktok/disconnect`: Chủ động ngắt kết nối và huỷ tiến trình reconnect.
+  - `GET /api/tiktok/status`: Lấy trạng thái kết nối hiện tại.
+  - Sự kiện Socket.IO `tiktok:status` đồng bộ trực tiếp lên giao diện Dashboard.
+- Unit Test: 7/7 test đạt (thêm test trích xuất avatar và user ID).
+
+---
+
+### Giai đoạn 6: Dashboard & OBS (Hoàn thiện bảng điều khiển streamer, cấu hình quà tặng, chạy thử nghiệm livestream thật) - [TIẾP THEO]
 - Đầu in di chuyển theo trục X/Y trên vị trí ô đang in.
 - Avatar hiện dần theo từng dòng (quét in từ trên xuống dưới / dither print effect).
 - Giấy cuộn/đẩy ra từ khe máy in khi đủ 6 ảnh (hoặc khi đẩy tờ dở).
