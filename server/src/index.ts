@@ -1,38 +1,25 @@
-import express from 'express';
 import cors from 'cors';
-import { createServer } from 'http';
-import { Server } from 'socket.io';
-import dotenv from 'dotenv';
+import express from 'express';
+import { createServer } from 'node:http';
+import { createCore } from './app.js';
+import { config } from './config.js';
+import { createRouter } from './routes/index.js';
+import { createSocketServer } from './socket/index.js';
 
-dotenv.config();
-
+const core = createCore();
 const app = express();
 const httpServer = createServer(app);
 
-app.use(cors());
+app.use(cors({ origin: config.clientOrigin }));
 app.use(express.json());
-
-const io = new Server(httpServer, {
-    cors: {
-        origin: 'http://localhost:5173',
-        methods: ['GET', 'POST'],
-    },
-});
 
 app.get('/', (_req, res) => {
     res.json({ message: 'PTP Printer Server is running!' });
 });
+app.use('/api', createRouter(core));
 
-io.on('connection', (socket) => {
-    console.log('Client connected:', socket.id);
+createSocketServer(httpServer, core, config.clientOrigin);
 
-    socket.on('disconnect', () => {
-        console.log('Client disconnected:', socket.id);
-    });
-});
-
-const PORT = process.env.PORT || 3001;
-
-httpServer.listen(PORT, () => {
-    console.log(`Server running at http://localhost:${PORT}`);
+httpServer.listen(config.port, () => {
+    console.log(`Server running at http://localhost:${config.port}`);
 });
