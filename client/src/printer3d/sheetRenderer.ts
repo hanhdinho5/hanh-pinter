@@ -3,7 +3,8 @@ import type { Sheet, SheetEntry } from '../types';
 
 /**
  * Quản lý vẽ và cập nhật bề mặt tờ giấy in (CanvasTexture)
- * Hỗ trợ in 6 ô avatar (2 cột x 3 hàng) hoặc 1 ô đặc biệt (fullPage)
+ * Hỗ trợ in 6 ô avatar, hiệu ứng quét từng dòng (scanline/dither) theo thời gian thực,
+ * viền vàng VIP lấp lánh và trang đặc biệt Full Page.
  */
 export class SheetCanvasRenderer {
     public canvas: HTMLCanvasElement;
@@ -42,9 +43,27 @@ export class SheetCanvasRenderer {
     }
 
     /**
-     * Vẽ toàn bộ tờ giấy dựa vào dữ liệu Sheet
+     * Vẽ toàn bộ tờ giấy dựa vào dữ liệu Sheet (chế độ tĩnh hoàn tất)
      */
     public renderSheet(sheet: Sheet): void {
+        this.renderSheetProgress(sheet, null, 1.0);
+    }
+
+    /**
+     * Vẽ tờ giấy có hỗ trợ hiệu ứng in động từng dòng (Progressive Printing)
+     * @param sheet Dữ liệu tờ in
+     * @param activeSlot Index ô đang in (0..5 hoặc null nếu không in)
+     * @param progress Tiến độ in của ô đang in (0.0 -> 1.0)
+     * @param activeEntry Dữ liệu người dùng đang in vào ô đó
+     * @param gleam Tiến độ vệt sáng ánh kim quét qua viền vàng (0.0 -> 1.0)
+     */
+    public renderSheetProgress(
+        sheet: Sheet,
+        activeSlot: number | null = null,
+        progress = 1.0,
+        activeEntry?: SheetEntry,
+        gleam = 0.0
+    ): void {
         const { width, height } = this.canvas;
         const ctx = this.ctx;
 
@@ -69,9 +88,9 @@ export class SheetCanvasRenderer {
 
         // 4. Nội dung: Trang đặc biệt hoặc 6 ô chuẩn
         if (sheet.kind === 'special') {
-            this.renderSpecialFullPage(sheet);
+            this.renderSpecialFullPageProgress(sheet, activeSlot !== null, progress, activeEntry ?? sheet.entries[0], gleam);
         } else {
-            this.renderStandardGrid(sheet);
+            this.renderStandardGridProgress(sheet, activeSlot, progress, activeEntry, gleam);
         }
 
         // 5. Đường cắt răng cưa ở chân giấy
@@ -108,7 +127,13 @@ export class SheetCanvasRenderer {
         ctx.fillText('LIVE COMMUNITY PHOTO WALL • PRINTED ON DEMAND', 50, 104);
     }
 
-    private renderStandardGrid(sheet: Sheet): void {
+    private renderStandardGridProgress(
+        sheet: Sheet,
+        activeSlot: number | null,
+        progress: number,
+        activeEntry?: SheetEntry,
+        gleam = 0.0
+    ): void {
         const { width, height } = this.canvas;
 
         // Lưới 2 cột x 3 hàng = 6 ô
@@ -131,32 +156,115 @@ export class SheetCanvasRenderer {
             const x = startX + col * (slotW + gapX);
             const y = startY + row * (slotH + gapY);
 
-            const entry = sheet.entries.find((e) => e.slot === slotIdx);
-            this.renderSlot(x, y, slotW, slotH, slotIdx, entry);
+            if (slotIdx === activeSlot && activeEntry) {
+                // Ô ĐANG IN TIẾN TRÌNH DẦN TỪ TRÊN XUỐNG
+                this.renderActivePrintingSlot(x, y, slotW, slotH, slotIdx, activeEntry, progress, gleam);
+            } else {
+                // Ô BÌNH THƯỜNG (đã in xong hoặc ô trống)
+                const entry = sheet.entries.find((e) => e.slot === slotIdx);
+                this.renderStaticSlot(x, y, slotW, slotH, slotIdx, entry, gleam);
+            }
         }
     }
 
-    private renderSlot(
+    /**
+     * Vẽ ô đang in với hiệu ứng cắt dòng (clip) và tia laser scanline rực sáng
+     */
+    private renderActivePrintingSlot(
         x: number,
         y: number,
         w: number,
         h: number,
         slotIdx: number,
-        entry?: SheetEntry
+        entry: SheetEntry,
+        progress: number,
+        gleam: number
     ): void {
         const ctx = this.ctx;
-        const isGold = entry?.frame === 'gold';
+        const isGold = entry.frame === 'gold';
+        const radius = 16;
 
-        // Bo góc khung ô
+        // 1. Vẽ nền ô trống phía dưới trước
+        ctx.fillStyle = '#f1f1ee';
+        this.roundRect(ctx, x, y, w, h, radius);
+        ctx.fill();
+
+        ctx.save();
+        ctx.setLineDash([8, 8]);
+        ctx.strokeStyle = '#d4d4cb';
+        ctx.lineWidth = 3;
+        this.roundRect(ctx, x, y, w, h, radius);
+        ctx.stroke();
+        ctx.restore();
+
+        // 2. Cắt clip phần nội dung đã in từ trên xuống
+        const currentPrintH = Math.max(1, h * Math.min(progress, 1.0));
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(x - 8, y - 8, w + 16, currentPrintH + 8);
+        ctx.clip();
+
+        // Vẽ nội dung thẻ avatar
+        this.renderCardContent(x, y, w, h, slotIdx, entry, isGold, gleam);
+
+        ctx.restore();
+
+        // 3. Tia quét Laser Scanline & Hạt chấm dither tại đường cắt
+        if (progress > 0 && progress < 1.0) {
+            const scanY = y + currentPrintH;
+
+            // Vệt sáng phát quang ngang qua thẻ
+            const beamGrad = ctx.createLinearGradient(x, scanY, x + w, scanY);
+            if (isGold) {
+                beamGrad.addColorStop(0, 'rgba(251, 191, 36, 0.2)');
+                beamGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.95)');
+                beamGrad.addColorStop(1, 'rgba(251, 191, 36, 0.2)');
+            } else {
+                beamGrad.addColorStop(0, 'rgba(56, 189, 248, 0.2)');
+                beamGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.95)');
+                beamGrad.addColorStop(1, 'rgba(56, 189, 248, 0.2)');
+            }
+
+            ctx.save();
+            ctx.strokeStyle = beamGrad;
+            ctx.lineWidth = 4;
+            ctx.shadowColor = isGold ? '#fbbf24' : '#38bdf8';
+            ctx.shadowBlur = 12;
+            ctx.beginPath();
+            ctx.moveTo(x - 4, scanY);
+            ctx.lineTo(x + w + 4, scanY);
+            ctx.stroke();
+
+            // Các chấm dither nhiệt mô phỏng in kim ảo
+            ctx.fillStyle = isGold ? '#f59e0b' : '#38bdf8';
+            for (let dot = 0; dot < 14; dot++) {
+                const dx = x + Math.random() * w;
+                const dy = scanY + (Math.random() * 6 - 3);
+                ctx.fillRect(dx, dy, 2, 2);
+            }
+            ctx.restore();
+        }
+    }
+
+    private renderStaticSlot(
+        x: number,
+        y: number,
+        w: number,
+        h: number,
+        slotIdx: number,
+        entry?: SheetEntry,
+        gleam = 0.0
+    ): void {
+        const ctx = this.ctx;
         const radius = 16;
 
         if (!entry) {
-            // Ô TRỐNG (đang chờ in)
+            // Ô TRỐNG
             ctx.fillStyle = '#f1f1ee';
             this.roundRect(ctx, x, y, w, h, radius);
             ctx.fill();
 
-            // Viền nét đứt
             ctx.save();
             ctx.setLineDash([8, 8]);
             ctx.strokeStyle = '#d4d4cb';
@@ -165,7 +273,6 @@ export class SheetCanvasRenderer {
             ctx.stroke();
             ctx.restore();
 
-            // Chữ placeholder
             ctx.fillStyle = '#9ca3af';
             ctx.font = 'bold 24px "Segoe UI", system-ui, sans-serif';
             ctx.textAlign = 'center';
@@ -176,6 +283,23 @@ export class SheetCanvasRenderer {
         }
 
         // Ô ĐÃ CÓ AVATAR
+        const isGold = entry.frame === 'gold';
+        this.renderCardContent(x, y, w, h, slotIdx, entry, isGold, gleam);
+    }
+
+    private renderCardContent(
+        x: number,
+        y: number,
+        w: number,
+        h: number,
+        slotIdx: number,
+        entry: SheetEntry,
+        isGold: boolean,
+        gleam: number
+    ): void {
+        const ctx = this.ctx;
+        const radius = 16;
+
         // Nền thẻ card
         ctx.fillStyle = isGold ? '#fffdf7' : '#ffffff';
         this.roundRect(ctx, x, y, w, h, radius);
@@ -183,8 +307,8 @@ export class SheetCanvasRenderer {
 
         // Đổ bóng thẻ
         ctx.save();
-        ctx.shadowColor = isGold ? 'rgba(245, 158, 11, 0.35)' : 'rgba(0, 0, 0, 0.08)';
-        ctx.shadowBlur = 10;
+        ctx.shadowColor = isGold ? 'rgba(245, 158, 11, 0.45)' : 'rgba(0, 0, 0, 0.08)';
+        ctx.shadowBlur = isGold ? 16 : 10;
         ctx.shadowOffsetY = 4;
         this.roundRect(ctx, x, y, w, h, radius);
         ctx.stroke();
@@ -203,6 +327,22 @@ export class SheetCanvasRenderer {
             this.roundRect(ctx, x, y, w, h, radius);
             ctx.stroke();
 
+            // Hiệu ứng ánh kim quét qua (Gleam Sweep)
+            if (gleam > 0) {
+                const gleamX = x - w + gleam * (w * 2);
+                const sweepGrad = ctx.createLinearGradient(gleamX, y, gleamX + 60, y + h);
+                sweepGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+                sweepGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.85)');
+                sweepGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+                ctx.save();
+                ctx.lineWidth = 8;
+                ctx.strokeStyle = sweepGrad;
+                this.roundRect(ctx, x, y, w, h, radius);
+                ctx.stroke();
+                ctx.restore();
+            }
+
             // Huy hiệu vương miện VIP
             this.renderBadge(x + w - 42, y + 16, '👑 GOLD', '#d97706', '#fef3c7');
         } else {
@@ -217,7 +357,7 @@ export class SheetCanvasRenderer {
         const avatarX = x + (w - avatarSize) / 2;
         const avatarY = y + 25;
 
-        // Vẽ ảnh Avatar (hoặc avatar đồ họa tự tạo)
+        // Vẽ ảnh Avatar
         this.drawAvatar(avatarX, avatarY, avatarSize, entry.avatarUrl, entry.username, isGold);
 
         // Vẽ tên Username
@@ -256,7 +396,6 @@ export class SheetCanvasRenderer {
         if (cachedImg) {
             ctx.drawImage(cachedImg, x, y, size, size);
         } else {
-            // Avatar giả lập phong cách gradient rực rỡ nếu chưa có ảnh mạng
             const hue = this.hashStringToHue(username);
             const grad = ctx.createLinearGradient(x, y, x + size, y + size);
             grad.addColorStop(0, `hsl(${hue}, 80%, 65%)`);
@@ -264,7 +403,6 @@ export class SheetCanvasRenderer {
             ctx.fillStyle = grad;
             ctx.fillRect(x, y, size, size);
 
-            // Chữ cái đầu
             ctx.font = `bold ${Math.floor(size * 0.44)}px "Segoe UI", system-ui, sans-serif`;
             ctx.fillStyle = '#ffffff';
             ctx.textAlign = 'center';
@@ -275,7 +413,6 @@ export class SheetCanvasRenderer {
 
         ctx.restore();
 
-        // Viền tròn avatar
         ctx.beginPath();
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
         ctx.strokeStyle = isGold ? '#f59e0b' : '#e2e8f0';
@@ -283,15 +420,28 @@ export class SheetCanvasRenderer {
         ctx.stroke();
     }
 
-    private renderSpecialFullPage(sheet: Sheet): void {
+    private renderSpecialFullPageProgress(
+        _sheet: Sheet,
+        isPrinting: boolean,
+        progress: number,
+        entry: SheetEntry,
+        _gleam = 0.0
+    ): void {
         const { width, height } = this.canvas;
         const ctx = this.ctx;
-        const entry = sheet.entries[0];
 
         const x = 50;
         const y = 160;
         const w = width - 100;
         const h = height - y - 80;
+
+        // Nếu đang in thì cắt clip theo tiến trình
+        const currentPrintH = isPrinting ? Math.max(1, h * Math.min(progress, 1.0)) : h;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(x - 10, y - 10, w + 20, currentPrintH + 20);
+        ctx.clip();
 
         // Nền đặc biệt hoàng gia
         const bgGrad = ctx.createLinearGradient(x, y, x + w, y + h);
@@ -347,6 +497,23 @@ export class SheetCanvasRenderer {
         ctx.font = 'bold 24px monospace';
         ctx.fillStyle = '#92400e';
         ctx.fillText('✦ THANK YOU FOR YOUR INCREDIBLE SUPPORT ✦', x + w / 2, avatarY + avatarSize + 120);
+
+        ctx.restore();
+
+        // Tia laser scanline khi đang in
+        if (isPrinting && progress < 1.0) {
+            const scanY = y + currentPrintH;
+            ctx.save();
+            ctx.strokeStyle = '#fbbf24';
+            ctx.lineWidth = 6;
+            ctx.shadowColor = '#f59e0b';
+            ctx.shadowBlur = 20;
+            ctx.beginPath();
+            ctx.moveTo(x - 10, scanY);
+            ctx.lineTo(x + w + 10, scanY);
+            ctx.stroke();
+            ctx.restore();
+        }
     }
 
     private renderBadge(x: number, y: number, text: string, stroke: string, fill: string): void {
@@ -385,7 +552,6 @@ export class SheetCanvasRenderer {
         ctx.lineTo(width - 30, y);
         ctx.stroke();
 
-        // Biểu tượng kéo cắt
         ctx.font = '16px monospace';
         ctx.fillStyle = '#64748b';
         ctx.textAlign = 'left';

@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type { Sheet, PrinterStatus, SheetEntry } from '../types';
+import type { PrinterCanvasHandle } from '../printer3d/PrinterCanvas';
 import {
     mockPartialSheet,
     mockFullSheet,
@@ -16,6 +17,7 @@ interface DevControlsProps {
     setCameraPreset: (preset: 'stream' | 'closeup' | 'overview') => void;
     obsMode: boolean;
     setObsMode: (val: boolean) => void;
+    printerRef: React.RefObject<PrinterCanvasHandle | null>;
 }
 
 export function DevControls({
@@ -27,47 +29,118 @@ export function DevControls({
     setCameraPreset,
     obsMode,
     setObsMode,
+    printerRef,
 }: DevControlsProps) {
-    const [collapsed, setCollapsed] = React.useState(false);
+    const [collapsed, setCollapsed] = useState(false);
+    const [isAnimating, setIsAnimating] = useState(false);
 
-    // Thêm ngẫu nhiên một avatar vào slot trống tiếp theo
-    const handleAddAvatar = (isGold = false) => {
-        if (sheet.kind === 'special' || sheet.entries.length >= 6) return;
+    // Kích hoạt hoạt ảnh in thử 1 avatar vào slot trống tiếp theo
+    const handleTriggerPrintAnimation = (isGold = false) => {
+        if (isAnimating || sheet.kind === 'special') return;
 
-        // Tìm slot trống đầu tiên
         const occupiedSlots = new Set(sheet.entries.map((e) => e.slot));
         let nextSlot = 0;
         while (nextSlot < 6 && occupiedSlots.has(nextSlot)) {
             nextSlot++;
         }
-        if (nextSlot >= 6) return;
+        if (nextSlot >= 6) {
+            alert('Tờ in hiện tại đã đủ 6 ô! Hãy bấm nút "Cuộn tờ mới" để đẩy tờ này đi.');
+            return;
+        }
 
         const randomNames = [
-            'tokyo_drift',
+            'alex_live',
             'cyber_kitty',
             'hoang_anh_99',
             'linh_dan_live',
             'panda_bamboo',
-            'super_fan_vn',
-            'diamond_lord',
+            'dragon_lord',
             'phoenix_fire',
+            'superstar_vn',
         ];
         const randomName = randomNames[Math.floor(Math.random() * randomNames.length)];
 
         const newEntry: SheetEntry = {
             slot: nextSlot,
-            jobId: `job-mock-${Date.now()}`,
+            jobId: `job-live-${Date.now()}`,
             userId: `user-${Date.now()}`,
             username: isGold ? `${randomName}_vip` : randomName,
             avatarUrl: null,
             frame: isGold ? 'gold' : 'normal',
         };
 
-        setSheet((prev) => ({
-            ...prev,
-            entries: [...prev.entries, newEntry].sort((a, b) => a.slot - b.slot),
-            completed: prev.entries.length + 1 >= 6,
-        }));
+        setIsAnimating(true);
+        setStatus('printing');
+
+        printerRef.current?.printSlot(newEntry, 2.3, () => {
+            setIsAnimating(false);
+            setStatus('idle');
+            setSheet((prev) => ({
+                ...prev,
+                entries: [...prev.entries, newEntry].sort((a, b) => a.slot - b.slot),
+                completed: prev.entries.length + 1 >= 6,
+            }));
+        });
+    };
+
+    // Kích hoạt hoạt ảnh in Trang đặc biệt Full Page (VIP)
+    const handleTriggerFullPageAnimation = () => {
+        if (isAnimating) return;
+
+        const specialEntry: SheetEntry = {
+            slot: 0,
+            jobId: `job-vip-${Date.now()}`,
+            userId: `user-superstar`,
+            username: 'TIKTOK_SUPERSTAR',
+            avatarUrl: null,
+            frame: 'gold',
+        };
+
+        const newSpecialSheet: Sheet = {
+            id: sheet.id + 1,
+            kind: 'special',
+            capacity: 1,
+            completed: false,
+            entries: [],
+        };
+
+        setIsAnimating(true);
+        setStatus('printing');
+
+        // Đầu tiên cuộn tờ cũ ra và đưa tờ đặc biệt vào
+        printerRef.current?.ejectSheet(newSpecialSheet, () => {
+            setSheet(newSpecialSheet);
+
+            // Bắt đầu quét in toàn trang đặc biệt
+            printerRef.current?.printSpecial(specialEntry, 3.2, () => {
+                setIsAnimating(false);
+                setStatus('idle');
+                setSheet((prev) => ({
+                    ...prev,
+                    entries: [specialEntry],
+                    completed: true,
+                }));
+            });
+        });
+    };
+
+    // Kích hoạt hoạt ảnh đẩy tờ cũ ra và kéo tờ mới vào
+    const handleTriggerEjectSheet = () => {
+        if (isAnimating) return;
+
+        const nextFreshSheet: Sheet = {
+            id: sheet.id + 1,
+            kind: 'standard',
+            capacity: 6,
+            completed: false,
+            entries: [],
+        };
+
+        setIsAnimating(true);
+        printerRef.current?.ejectSheet(nextFreshSheet, () => {
+            setIsAnimating(false);
+            setSheet(nextFreshSheet);
+        });
     };
 
     if (collapsed) {
@@ -90,7 +163,7 @@ export function DevControls({
                     zIndex: 9999,
                 }}
             >
-                ⚙ Mở bảng điều khiển thử nghiệm (Phase 2)
+                ⚙ Bảng điều khiển thử nghiệm (Phase 3: Hoạt ảnh)
             </button>
         );
     }
@@ -101,7 +174,7 @@ export function DevControls({
                 position: 'fixed',
                 top: '16px',
                 right: '16px',
-                width: '320px',
+                width: '330px',
                 maxHeight: 'calc(100vh - 32px)',
                 overflowY: 'auto',
                 background: 'rgba(15, 23, 42, 0.94)',
@@ -127,10 +200,10 @@ export function DevControls({
             >
                 <div>
                     <h3 style={{ margin: 0, fontSize: '15px', color: '#38bdf8' }}>
-                        ⚙ Phase 2: Máy In 3D
+                        ⚙ Phase 3: Hoạt Ảnh Máy In
                     </h3>
                     <div style={{ fontSize: '11px', color: '#94a3b8' }}>
-                        Workshop Three.js • Khung 9:16
+                        Quét dòng • Cuộn giấy • Hạt vàng VIP
                     </div>
                 </div>
                 <button
@@ -147,31 +220,90 @@ export function DevControls({
                 </button>
             </div>
 
-            {/* Mục 1: Chọn mẫu dữ liệu Sheet */}
+            {/* Mục 1: KÍCH HOẠT HOẠT ẢNH IN THỰC TẾ (CORE PHASE 3) */}
+            <div style={{ marginBottom: '16px', background: 'rgba(30, 41, 59, 0.5)', padding: '10px', borderRadius: '8px' }}>
+                <div style={{ fontWeight: 600, marginBottom: '8px', color: '#38bdf8' }}>
+                    🎬 Thử nghiệm Hoạt ảnh Real-time:
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <button
+                        disabled={isAnimating || sheet.kind === 'special' || sheet.entries.length >= 6}
+                        onClick={() => handleTriggerPrintAnimation(false)}
+                        style={{
+                            ...actionBtnStyle,
+                            background: isAnimating ? '#334155' : '#2563eb',
+                            borderColor: '#3b82f6',
+                            cursor: isAnimating ? 'not-allowed' : 'pointer',
+                        }}
+                    >
+                        ▶ In 1 Avatar (Quét dòng laser xanh)
+                    </button>
+                    <button
+                        disabled={isAnimating || sheet.kind === 'special' || sheet.entries.length >= 6}
+                        onClick={() => handleTriggerPrintAnimation(true)}
+                        style={{
+                            ...actionBtnStyle,
+                            background: isAnimating ? '#334155' : '#d97706',
+                            borderColor: '#f59e0b',
+                            cursor: isAnimating ? 'not-allowed' : 'pointer',
+                        }}
+                    >
+                        👑 In Khung Vàng (Quét vàng + Bắn hạt VIP)
+                    </button>
+                    <button
+                        disabled={isAnimating}
+                        onClick={handleTriggerEjectSheet}
+                        style={{
+                            ...actionBtnStyle,
+                            background: '#0d9488',
+                            borderColor: '#14b8a6',
+                        }}
+                    >
+                        📜 Cuộn tờ mới (Đẩy tờ cũ ra)
+                    </button>
+                    <button
+                        disabled={isAnimating}
+                        onClick={handleTriggerFullPageAnimation}
+                        style={{
+                            ...actionBtnStyle,
+                            background: '#9333ea',
+                            borderColor: '#a855f7',
+                        }}
+                    >
+                        ⭐ In Trang Đặc Biệt Full Page (VIP ≥ 1k)
+                    </button>
+                </div>
+            </div>
+
+            {/* Mục 2: Mẫu dữ liệu tĩnh */}
             <div style={{ marginBottom: '16px' }}>
                 <div style={{ fontWeight: 600, marginBottom: '6px', color: '#cbd5e1' }}>
-                    📄 Mẫu Tờ Giấy In (Mock Sheet):
+                    📄 Chuyển đổi mẫu dữ liệu tĩnh:
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
                     <button
+                        disabled={isAnimating}
                         onClick={() => setSheet(mockPartialSheet)}
                         style={btnStyle(sheet.id === mockPartialSheet.id)}
                     >
-                        Tờ 4/6 ô (Có vàng)
+                        Tờ 4/6 ô
                     </button>
                     <button
+                        disabled={isAnimating}
                         onClick={() => setSheet(mockFullSheet)}
                         style={btnStyle(sheet.id === mockFullSheet.id)}
                     >
                         Đầy đủ 6/6 ô
                     </button>
                     <button
+                        disabled={isAnimating}
                         onClick={() => setSheet(mockSpecialSheet)}
                         style={btnStyle(sheet.kind === 'special')}
                     >
-                        👑 Trang VIP (≥1k)
+                        Trang VIP
                     </button>
                     <button
+                        disabled={isAnimating}
                         onClick={() => setSheet(mockEmptySheet)}
                         style={btnStyle(sheet.id === mockEmptySheet.id && sheet.entries.length === 0)}
                     >
@@ -180,56 +312,28 @@ export function DevControls({
                 </div>
             </div>
 
-            {/* Mục 2: Thử thêm avatar vào ô trống */}
-            <div style={{ marginBottom: '16px' }}>
-                <div style={{ fontWeight: 600, marginBottom: '6px', color: '#cbd5e1' }}>
-                    ➕ Giả lập in thêm Avatar ({sheet.entries.length}/6):
-                </div>
-                <div style={{ display: 'flex', gap: '6px' }}>
-                    <button
-                        disabled={sheet.kind === 'special' || sheet.entries.length >= 6}
-                        onClick={() => handleAddAvatar(false)}
-                        style={{
-                            ...actionBtnStyle,
-                            opacity: sheet.kind === 'special' || sheet.entries.length >= 6 ? 0.4 : 1,
-                        }}
-                    >
-                        + Khung thường
-                    </button>
-                    <button
-                        disabled={sheet.kind === 'special' || sheet.entries.length >= 6}
-                        onClick={() => handleAddAvatar(true)}
-                        style={{
-                            ...actionBtnStyle,
-                            background: '#d97706',
-                            borderColor: '#f59e0b',
-                            opacity: sheet.kind === 'special' || sheet.entries.length >= 6 ? 0.4 : 1,
-                        }}
-                    >
-                        + Khung vàng (VIP)
-                    </button>
-                </div>
-            </div>
-
             {/* Mục 3: Trạng thái máy in */}
             <div style={{ marginBottom: '16px' }}>
                 <div style={{ fontWeight: 600, marginBottom: '6px', color: '#cbd5e1' }}>
-                    🚥 Đèn & Màn hình máy in:
+                    🚥 Đèn chiếu đầu in:
                 </div>
                 <div style={{ display: 'flex', gap: '6px' }}>
                     <button
+                        disabled={isAnimating}
                         onClick={() => setStatus('idle')}
                         style={statusBtnStyle(status === 'idle', '#10b981')}
                     >
                         Sẵn sàng
                     </button>
                     <button
+                        disabled={isAnimating}
                         onClick={() => setStatus('printing')}
                         style={statusBtnStyle(status === 'printing', '#38bdf8')}
                     >
                         Đang in
                     </button>
                     <button
+                        disabled={isAnimating}
                         onClick={() => setStatus('paused')}
                         style={statusBtnStyle(status === 'paused', '#f59e0b')}
                     >
@@ -248,7 +352,7 @@ export function DevControls({
                         onClick={() => setCameraPreset('stream')}
                         style={btnStyle(cameraPreset === 'stream')}
                     >
-                        9:16 Chuẩn
+                        9:16 Livecade
                     </button>
                     <button
                         onClick={() => setCameraPreset('closeup')}
@@ -265,7 +369,7 @@ export function DevControls({
                 </div>
             </div>
 
-            {/* Mục 5: Chế độ hiển thị */}
+            {/* Mục 5: Chế độ hiển thị OBS */}
             <div style={{ borderTop: '1px solid #334155', paddingTop: '10px' }}>
                 <label
                     style={{
@@ -302,15 +406,17 @@ const btnStyle = (active: boolean): React.CSSProperties => ({
 });
 
 const actionBtnStyle: React.CSSProperties = {
-    flex: 1,
-    padding: '8px 10px',
-    background: '#2563eb',
+    padding: '9px 12px',
     color: '#ffffff',
-    border: '1px solid #3b82f6',
+    border: '1px solid transparent',
     borderRadius: '6px',
     fontSize: '12px',
     fontWeight: 600,
     cursor: 'pointer',
+    textAlign: 'left',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
 };
 
 const statusBtnStyle = (active: boolean, color: string): React.CSSProperties => ({
@@ -325,4 +431,3 @@ const statusBtnStyle = (active: boolean, color: string): React.CSSProperties => 
     cursor: 'pointer',
     textAlign: 'center',
 });
-

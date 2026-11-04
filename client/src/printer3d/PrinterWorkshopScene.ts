@@ -10,7 +10,8 @@ import {
     createActionBadgesBar,
 } from './workshopProps';
 import { SheetCanvasRenderer } from './sheetRenderer';
-import type { Sheet, PrinterStatus } from '../types';
+import { SparkleParticleSystem } from './particles';
+import type { Sheet, SheetEntry, PrinterStatus } from '../types';
 
 export class PrinterWorkshopScene {
     public container: HTMLElement;
@@ -24,6 +25,7 @@ export class PrinterWorkshopScene {
     public printHeadGroup: THREE.Group;
     public printHeadLight: THREE.SpotLight;
     public gantryBar: THREE.Group;
+    public particles: SparkleParticleSystem;
 
     // Animation & control
     private animationFrameId: number | null = null;
@@ -36,13 +38,31 @@ export class PrinterWorkshopScene {
 
     // Trạng thái máy in
     private printerStatus: PrinterStatus = 'idle';
+    private currentSheet: Sheet | null = null;
+
+    // Trạng thái hoạt ảnh in (Animation State)
+    private isPrintingActive = false;
+    private activeSlot: number | null = null;
+    private activeEntry: SheetEntry | null = null;
+    private printProgress = 0.0;
+    private printDuration = 2.5; // giây
+    private printElapsedTime = 0.0;
+    private gleamProgress = 0.0;
+    private onPrintCompleteCallback: (() => void) | null = null;
+
+    // Trạng thái hoạt ảnh đẩy giấy (Sheet Eject Animation State)
+    private isEjecting = false;
+    private ejectProgress = 0.0;
+    private ejectDuration = 1.4; // giây
+    private nextSheetData: Sheet | null = null;
+    private onEjectCompleteCallback: (() => void) | null = null;
 
     constructor(container: HTMLElement) {
         this.container = container;
 
         // 1. Scene
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x0e0a07); // Không gian xưởng mờ tối ấm cúng
+        this.scene.background = new THREE.Color(0x0e0a07);
 
         // 2. Camera chuẩn góc 9:16 (Livecade top-down isometric)
         const aspect = container.clientWidth / container.clientHeight;
@@ -74,34 +94,32 @@ export class PrinterWorkshopScene {
         this.paperMesh = this.createPaperMesh();
         this.scene.add(this.paperMesh);
 
-        // 7. Máy in dạng Plotter CNC mở (Open-frame Gantry & Rails phong cách Livecade)
+        // 7. Máy in dạng Plotter CNC mở
         const { gantry, printHead, printHeadLight } = this.createPlotterPrinter();
         this.scene.add(gantry);
         this.printHeadGroup = printHead;
         this.printHeadLight = printHeadLight;
         this.gantryBar = gantry;
 
-        // 8. Thanh huy hiệu hành động nổi [PRINT] [GOLD FRAME] [FULL PAGE] [LEGENDARY]
+        // 8. Hệ thống hạt lấp lánh (Sparkle Particle System)
+        this.particles = new SparkleParticleSystem(this.scene);
+
+        // 9. Dải huy hiệu hành động nổi
         const actionBadges = createActionBadgesBar();
         this.scene.add(actionBadges);
 
-        // 9. Resize listener
+        // 10. Resize listener
         this.onWindowResize = this.onWindowResize.bind(this);
         window.addEventListener('resize', this.onWindowResize);
 
-        // 10. Render Loop
+        // 11. Render Loop
         this.startRenderLoop();
     }
 
-    /**
-     * Cài đặt ánh sáng xưởng thủ công ấm cúng: Đèn bàn cổ điển + ánh sáng môi trường dịu
-     */
     private setupLighting(): void {
-        // Ánh sáng nền ấm tối
         const ambient = new THREE.AmbientLight(0xffeedd, 1.1);
         this.scene.add(ambient);
 
-        // Đèn chiếu mờ từ trên cao
         const overheadKey = new THREE.DirectionalLight(0xffdfba, 1.8);
         overheadKey.position.set(2.0, 6.0, 2.5);
         overheadKey.castShadow = true;
@@ -110,22 +128,12 @@ export class PrinterWorkshopScene {
         overheadKey.shadow.bias = -0.0004;
         this.scene.add(overheadKey);
 
-        // Ánh sáng bù viền xanh dịu từ bên phải
         const rimFill = new THREE.DirectionalLight(0x7890b0, 0.5);
         rimFill.position.set(4.0, 3.0, 1.0);
         this.scene.add(rimFill);
     }
 
-    /**
-     * Dựng môi trường xưởng giống Livecade PFP Printer:
-     * - Mặt bàn gỗ với các đường rãnh ván gỗ nằm ngang
-     * - Tường gỗ sẫm màu
-     * - Bảng pegboard treo kìm, búa, cờ lê
-     * - Kệ gỗ 2 tầng chứa lọ thủy tinh linh kiện & hộp đựng
-     * - Đèn bàn cổ điển uốn cong tỏa ánh sáng vàng rực
-     */
     private setupEnvironment(): void {
-        // 1. Mặt bàn gỗ ván (Table Desk)
         const tableTex = createWoodTexture(1024, 1024, false);
         tableTex.map.repeat.set(1.5, 3);
         tableTex.roughnessMap.repeat.set(1.5, 3);
@@ -142,7 +150,6 @@ export class PrinterWorkshopScene {
         table.receiveShadow = true;
         this.scene.add(table);
 
-        // Các khe rãnh ván gỗ trên mặt bàn tạo chiều sâu
         const grooveMat = new THREE.MeshBasicMaterial({ color: 0x140b05 });
         for (let gz = -2.5; gz <= 4.0; gz += 0.85) {
             const grooveGeo = new THREE.BoxGeometry(8.02, 0.005, 0.015);
@@ -151,7 +158,6 @@ export class PrinterWorkshopScene {
             this.scene.add(groove);
         }
 
-        // 2. Tường gỗ phía sau (Backdrop Wall)
         const wallTex = createWoodTexture(1024, 1024, true);
         wallTex.map.repeat.set(2, 1);
         const wallGeo = new THREE.PlaneGeometry(10, 8);
@@ -165,24 +171,17 @@ export class PrinterWorkshopScene {
         wall.receiveShadow = true;
         this.scene.add(wall);
 
-        // 3. Pegboard treo dụng cụ (kìm, búa, cờ lê)
         const pegboard = createWallPegboardAndTools();
         this.scene.add(pegboard);
 
-        // 4. Kệ gỗ 2 tầng bên phải (lọ thủy tinh & hộp đựng)
         const shelf = createWorkshopShelf();
         this.scene.add(shelf);
 
-        // 5. Đèn bàn cổ điển (Vintage Desk Lamp) bên góc trái
         const { lampGroup } = createVintageDeskLamp();
         this.scene.add(lampGroup);
     }
 
-    /**
-     * Dựng máy in dạng Plotter CNC mở (Open-frame Gantry & Rails phong cách Livecade)
-     */
     private createPlotterPrinter() {
-        // 1. Hai thanh ray trượt kim loại hai bên mép giấy (Side Guide Rails)
         const railLength = 3.6;
         const railGeo = new THREE.CylinderGeometry(0.022, 0.022, railLength, 16);
         const railMat = new THREE.MeshStandardMaterial({
@@ -191,21 +190,18 @@ export class PrinterWorkshopScene {
             roughness: 0.15,
         });
 
-        // Ray trái
         const leftRail = new THREE.Mesh(railGeo, railMat);
         leftRail.rotation.x = Math.PI / 2;
         leftRail.position.set(-1.16, 0.18, 0.8);
         leftRail.castShadow = true;
         this.scene.add(leftRail);
 
-        // Ray phải
         const rightRail = new THREE.Mesh(railGeo, railMat);
         rightRail.rotation.x = Math.PI / 2;
         rightRail.position.set(1.16, 0.18, 0.8);
         rightRail.castShadow = true;
         this.scene.add(rightRail);
 
-        // Chân đế gắn thanh ray xuống mặt bàn (4 góc ray)
         const mountGeo = new THREE.BoxGeometry(0.08, 0.14, 0.08);
         const mountMat = new THREE.MeshStandardMaterial({ color: 0x1f242c, metalness: 0.85 });
         for (const rx of [-1.16, 1.16]) {
@@ -216,7 +212,6 @@ export class PrinterWorkshopScene {
             }
         }
 
-        // 2. Thanh dầm ngang chính của máy in (Gantry Crossbar)
         const gantryGroup = new THREE.Group();
         gantryGroup.position.set(0, 0.28, -0.65);
 
@@ -229,13 +224,11 @@ export class PrinterWorkshopScene {
             metalness: 0.9,
         });
 
-        // Khối dầm ngang kim loại đen
         const barGeo = new THREE.BoxGeometry(2.46, 0.14, 0.18);
         const barMesh = new THREE.Mesh(barGeo, darkChassisMat);
         barMesh.castShadow = true;
         gantryGroup.add(barMesh);
 
-        // Cục bạc đạn trượt hình trụ ở 2 đầu thanh dầm
         const bearingGeo = new THREE.CylinderGeometry(0.065, 0.065, 0.22, 16);
         const bearingMat = new THREE.MeshStandardMaterial({
             color: 0x3b424d,
@@ -253,7 +246,6 @@ export class PrinterWorkshopScene {
         rightBearing.position.set(1.16, 0, 0);
         gantryGroup.add(rightBearing);
 
-        // Nắp che kim loại bạc viền đầu thanh dầm
         const capGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.03, 16);
         const silverMat = new THREE.MeshStandardMaterial({ color: 0xccd6e0, metalness: 0.9 });
         for (const bx of [-1.24, 1.24]) {
@@ -263,23 +255,19 @@ export class PrinterWorkshopScene {
             gantryGroup.add(cap);
         }
 
-        // Khe cấp giấy phía sau dầm ngang (Feed Slot)
         const feederGeo = new THREE.BoxGeometry(2.15, 0.06, 0.2);
         const feeder = new THREE.Mesh(feederGeo, darkChassisMat);
         feeder.position.set(0, 0.04, -0.16);
         gantryGroup.add(feeder);
 
-        // 3. Đầu in hình hộp vuông trượt trên thanh dầm (Print Head Carriage)
         const printHead = new THREE.Group();
         printHead.position.set(0, 0.02, 0.08);
 
-        // Thân đầu in màu đen nhám
         const headGeo = new THREE.BoxGeometry(0.24, 0.18, 0.2);
         const headMesh = new THREE.Mesh(headGeo, darkChassisMat);
         headMesh.castShadow = true;
         printHead.add(headMesh);
 
-        // Rãnh tản nhiệt trên đầu in
         const finMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.8 });
         for (let f = -0.05; f <= 0.05; f += 0.03) {
             const finGeo = new THREE.BoxGeometry(0.25, 0.01, 0.18);
@@ -288,7 +276,6 @@ export class PrinterWorkshopScene {
             printHead.add(fin);
         }
 
-        // Đèn LED chiếu điểm ngay dưới đầu in (Spotlight soi thẳng vào điểm đang in)
         const headLedGeo = new THREE.SphereGeometry(0.02, 12, 12);
         const headLedMat = new THREE.MeshBasicMaterial({ color: 0xfff4e0 });
         const headLed = new THREE.Mesh(headLedGeo, headLedMat);
@@ -310,24 +297,16 @@ export class PrinterWorkshopScene {
         };
     }
 
-    /**
-     * Tạo Mesh tờ giấy in trải dài từ thanh dầm máy in chảy thẳng về phía người xem
-     */
     private createPaperMesh(): THREE.Mesh {
         const paperWidth = 2.05;
         const paperLength = 3.4;
 
-        // PlaneGeometry trải trên mặt phẳng XZ (nằm trên bàn gỗ)
         const geo = new THREE.PlaneGeometry(paperWidth, paperLength, 16, 32);
-
-        // Xoay nằm ngang trên bàn
         geo.rotateX(-Math.PI / 2);
 
-        // Uốn cong nhẹ đoạn đầu giấy chui ra từ dưới thanh dầm
         const pos = geo.attributes.position;
         for (let i = 0; i < pos.count; i++) {
             const z = pos.getZ(i);
-            // Đoạn chui ra từ thanh gantry (z âm) nhấc lên một chút
             if (z < -0.3) {
                 const factor = (-0.3 - z) / 1.4;
                 pos.setY(i, 0.015 + factor * 0.12);
@@ -345,22 +324,23 @@ export class PrinterWorkshopScene {
         });
 
         const paperMesh = new THREE.Mesh(geo, mat);
-        paperMesh.position.set(0, 0, 0.85); // Đặt tâm giấy trượt dài trên mặt bàn
+        paperMesh.position.set(0, 0, 0.85);
         paperMesh.receiveShadow = true;
 
         return paperMesh;
     }
 
-    /**
-     * Cập nhật dữ liệu tờ giấy (Sheet) và vẽ lại CanvasTexture
-     */
     public updateSheet(sheet: Sheet): void {
-        this.sheetRenderer.renderSheet(sheet);
+        this.currentSheet = sheet;
+        if (!this.isPrintingActive) {
+            this.sheetRenderer.renderSheet(sheet);
+        }
     }
 
-    /**
-     * Cập nhật trạng thái máy in (idle, printing, paused)
-     */
+    public getPrinterStatus(): PrinterStatus {
+        return this.printerStatus;
+    }
+
     public setPrinterStatus(status: PrinterStatus, _currentSlot?: number): void {
         this.printerStatus = status;
 
@@ -376,27 +356,209 @@ export class PrinterWorkshopScene {
         }
     }
 
-    /**
-     * Chuyển đổi góc nhìn Camera
-     */
     public setCameraPreset(preset: 'stream' | 'closeup' | 'overview'): void {
         if (preset === 'stream') {
-            // Góc 9:16 chuẩn giống hình chụp Livecade
             this.desiredCamPos.set(0, 4.3, 3.7);
             this.desiredTarget.set(0, 1.0, 0.3);
         } else if (preset === 'closeup') {
-            // Cận cảnh tờ giấy in
             this.desiredCamPos.set(0, 2.8, 2.5);
             this.desiredTarget.set(0, 0.3, 0.9);
         } else if (preset === 'overview') {
-            // Nghiêng toàn cảnh xưởng
             this.desiredCamPos.set(1.4, 4.5, 4.2);
             this.desiredTarget.set(0, 0.8, 0.4);
         }
     }
 
+    // =========================================================================
+    // HOẠT ẢNH GIAI ĐOẠN 3 (ANIMATIONS & EFFECTS)
+    // =========================================================================
+
     /**
-     * Vòng lặp Render Three.js với chuyển động mượt mà
+     * Kích hoạt hoạt ảnh in quét từng dòng một avatar vào ô slot
+     */
+    public startPrintSlotAnimation(
+        entry: SheetEntry,
+        durationSeconds = 2.4,
+        onComplete?: () => void
+    ): void {
+        this.isPrintingActive = true;
+        this.activeSlot = entry.slot;
+        this.activeEntry = entry;
+        this.printProgress = 0.0;
+        this.printElapsedTime = 0.0;
+        this.printDuration = durationSeconds;
+        this.gleamProgress = 0.0;
+        this.onPrintCompleteCallback = onComplete ?? null;
+
+        this.setPrinterStatus('printing');
+
+        // Cài đặt màu đèn đầu in phù hợp với khung
+        if (entry.frame === 'gold') {
+            this.printHeadLight.color.setHex(0xfbbf24);
+            this.printHeadLight.intensity = 6.0;
+        } else {
+            this.printHeadLight.color.setHex(0xffffff);
+            this.printHeadLight.intensity = 4.5;
+        }
+    }
+
+    /**
+     * Kích hoạt hoạt ảnh in Trang đặc biệt Full Page
+     */
+    public startPrintSpecialAnimation(
+        entry: SheetEntry,
+        durationSeconds = 3.5,
+        onComplete?: () => void
+    ): void {
+        this.isPrintingActive = true;
+        this.activeSlot = 0;
+        this.activeEntry = entry;
+        this.printProgress = 0.0;
+        this.printElapsedTime = 0.0;
+        this.printDuration = durationSeconds;
+        this.gleamProgress = 0.0;
+        this.onPrintCompleteCallback = onComplete ?? null;
+
+        this.setPrinterStatus('printing');
+        this.printHeadLight.color.setHex(0xf59e0b);
+        this.printHeadLight.intensity = 7.0;
+    }
+
+    /**
+     * Kích hoạt hoạt ảnh cuộn tờ giấy cũ ra ngoài và nạp tờ mới vào
+     */
+    public startEjectSheetAnimation(nextSheet: Sheet, onComplete?: () => void): void {
+        this.isEjecting = true;
+        this.ejectProgress = 0.0;
+        this.nextSheetData = nextSheet;
+        this.onEjectCompleteCallback = onComplete ?? null;
+    }
+
+    /**
+     * Tính toạ độ 3D của ô slot trên mặt bàn để bùng nổ hạt ánh kim
+     */
+    private getSlotWorldPosition(slotIdx: number): THREE.Vector3 {
+        const col = slotIdx % 2;
+        const row = Math.floor(slotIdx / 2);
+
+        const x = col === 0 ? -0.52 : 0.52;
+        const z = -0.1 + row * 0.95;
+        const y = 0.04;
+
+        return new THREE.Vector3(x, y, z);
+    }
+
+    /**
+     * Cập nhật tiến trình in từng dòng và vị trí đầu in trong Render Loop
+     */
+    private updatePrintAnimation(delta: number, time: number): void {
+        if (!this.isPrintingActive || this.activeSlot === null || !this.activeEntry || !this.currentSheet) {
+            return;
+        }
+
+        this.printElapsedTime += delta;
+        this.printProgress = Math.min(1.0, this.printElapsedTime / this.printDuration);
+
+        // Hiệu ứng quét ánh kim viền vàng khi tiến độ > 0.8
+        if (this.activeEntry.frame === 'gold' && this.printProgress > 0.8) {
+            this.gleamProgress = (this.printProgress - 0.8) / 0.2;
+        }
+
+        // Vẽ lại canvas texture với tiến trình cắt dòng
+        this.sheetRenderer.renderSheetProgress(
+            this.currentSheet,
+            this.activeSlot,
+            this.printProgress,
+            this.activeEntry,
+            this.gleamProgress
+        );
+
+        // Chuyển động đầu in: Di chuyển ngang zigzag qua lại vùng ô đang in
+        const isSpecial = this.currentSheet.kind === 'special';
+        let targetCenterX = 0;
+        let sweepWidth = 0.42;
+
+        if (isSpecial) {
+            targetCenterX = 0;
+            sweepWidth = 0.82;
+        } else {
+            const col = this.activeSlot % 2;
+            targetCenterX = col === 0 ? -0.52 : 0.52;
+        }
+
+        // Tần số quét cao mô phỏng đầu kim in ngang
+        const scanOscillation = Math.sin(time * 18) * sweepWidth;
+        this.printHeadGroup.position.x = targetCenterX + scanOscillation;
+
+        // Khi in hoàn thành 100%
+        if (this.printProgress >= 1.0) {
+            this.isPrintingActive = false;
+            this.setPrinterStatus('idle');
+
+            // Bùng nổ hạt lấp lánh nếu là khung vàng hoặc trang đặc biệt
+            if (isSpecial) {
+                this.particles.burstGrandCelebration(new THREE.Vector3(0, 0.05, 0.8));
+            } else if (this.activeEntry.frame === 'gold') {
+                const burstPos = this.getSlotWorldPosition(this.activeSlot);
+                this.particles.burstGoldSparkles(burstPos, 50);
+            }
+
+            // Gọi callback hoàn tất
+            const cb = this.onPrintCompleteCallback;
+            this.onPrintCompleteCallback = null;
+            this.activeSlot = null;
+            this.activeEntry = null;
+            cb?.();
+        }
+    }
+
+    /**
+     * Cập nhật tiến trình đẩy giấy ra và nạp giấy mới trong Render Loop
+     */
+    private updateEjectAnimation(delta: number): void {
+        if (!this.isEjecting) return;
+
+        this.ejectProgress += delta / this.ejectDuration;
+
+        // Nửa đầu (0.0 -> 0.5): Tờ giấy cũ trượt vút về phía trước rơi khỏi bàn
+        if (this.ejectProgress < 0.5) {
+            const t = this.ejectProgress * 2; // 0 -> 1
+            // Trượt từ 0.85 -> 4.5
+            this.paperMesh.position.z = 0.85 + Math.pow(t, 2) * 3.65;
+            // Rơi nghiêng xuống mép bàn
+            this.paperMesh.position.y = -Math.pow(t, 2) * 0.9;
+        }
+        // Giữa chặng (0.5): Đổi dữ liệu sang tờ mới và đặt ở vị trí sau khe dầm
+        else if (this.ejectProgress >= 0.5 && this.nextSheetData) {
+            this.currentSheet = this.nextSheetData;
+            this.sheetRenderer.renderSheet(this.nextSheetData);
+            this.nextSheetData = null; // Chỉ đổi 1 lần
+
+            this.paperMesh.position.z = -1.2;
+            this.paperMesh.position.y = 0.015;
+        }
+        // Nửa sau (0.5 -> 1.0): Tờ mới chui từ khe máy in trượt vào vị trí chuẩn
+        else {
+            const t = (this.ejectProgress - 0.5) * 2; // 0 -> 1
+            // Trượt từ -1.2 -> 0.85
+            const easeOut = 1 - Math.pow(1 - t, 3);
+            this.paperMesh.position.z = -1.2 + easeOut * 2.05;
+            this.paperMesh.position.y = 0.015;
+        }
+
+        // Hoàn tất cuộn giấy
+        if (this.ejectProgress >= 1.0) {
+            this.isEjecting = false;
+            this.paperMesh.position.set(0, 0, 0.85);
+
+            const cb = this.onEjectCompleteCallback;
+            this.onEjectCompleteCallback = null;
+            cb?.();
+        }
+    }
+
+    /**
+     * Vòng lặp Render Three.js chính
      */
     private startRenderLoop(): void {
         const animate = () => {
@@ -405,19 +567,27 @@ export class PrinterWorkshopScene {
             const delta = this.clock.getDelta();
             const time = this.clock.getElapsedTime();
 
-            // Nếu đang ở trạng thái printing, đầu in lắc lư nhẹ mô phỏng hoạt động
-            if (this.printerStatus === 'printing') {
-                this.printHeadGroup.position.x = Math.sin(time * 6) * 0.45;
-            } else {
-                // Đưa về giữa
+            // 1. Cập nhật hoạt ảnh in avatar
+            if (this.isPrintingActive) {
+                this.updatePrintAnimation(delta, time);
+            } else if (!this.isEjecting) {
+                // Khi nghỉ, đầu in nhẹ nhàng lướt về tâm máy
                 this.printHeadGroup.position.x = THREE.MathUtils.lerp(
                     this.printHeadGroup.position.x,
                     0,
-                    delta * 3
+                    delta * 4
                 );
             }
 
-            // Camera di chuyển mềm mại về vị trí mong muốn
+            // 2. Cập nhật hoạt ảnh đẩy giấy
+            if (this.isEjecting) {
+                this.updateEjectAnimation(delta);
+            }
+
+            // 3. Cập nhật hạt ánh kim / pháo hoa
+            this.particles.update(delta);
+
+            // 4. Camera di chuyển mềm mại
             this.camera.position.lerp(this.desiredCamPos, delta * 3.5);
             this.currentTarget.lerp(this.desiredTarget, delta * 3.5);
             this.camera.lookAt(this.currentTarget);
@@ -428,9 +598,6 @@ export class PrinterWorkshopScene {
         animate();
     }
 
-    /**
-     * Thay đổi kích thước khung hình
-     */
     public onWindowResize(): void {
         if (!this.container) return;
         const width = this.container.clientWidth;
@@ -442,15 +609,13 @@ export class PrinterWorkshopScene {
         this.renderer.setSize(width, height);
     }
 
-    /**
-     * Giải phóng bộ nhớ WebGL khi unmount
-     */
     public dispose(): void {
         if (this.animationFrameId !== null) {
             cancelAnimationFrame(this.animationFrameId);
         }
         window.removeEventListener('resize', this.onWindowResize);
 
+        this.particles.dispose();
         this.renderer.dispose();
         if (this.renderer.domElement.parentElement) {
             this.renderer.domElement.parentElement.removeChild(this.renderer.domElement);

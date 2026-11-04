@@ -1,6 +1,13 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 import { PrinterWorkshopScene } from './PrinterWorkshopScene';
-import type { Sheet, PrinterStatus } from '../types';
+import type { Sheet, SheetEntry, PrinterStatus } from '../types';
+
+export interface PrinterCanvasHandle {
+    printSlot: (entry: SheetEntry, durationSeconds?: number, onComplete?: () => void) => void;
+    printSpecial: (entry: SheetEntry, durationSeconds?: number, onComplete?: () => void) => void;
+    ejectSheet: (nextSheet: Sheet, onComplete?: () => void) => void;
+    setCameraPreset: (preset: 'stream' | 'closeup' | 'overview') => void;
+}
 
 interface PrinterCanvasProps {
     sheet: Sheet;
@@ -9,63 +16,69 @@ interface PrinterCanvasProps {
     cameraPreset?: 'stream' | 'closeup' | 'overview';
 }
 
-export function PrinterCanvas({
-    sheet,
-    status,
-    currentSlot,
-    cameraPreset = 'stream',
-}: PrinterCanvasProps) {
-    const containerRef = useRef<HTMLDivElement>(null);
-    const sceneRef = useRef<PrinterWorkshopScene | null>(null);
+export const PrinterCanvas = forwardRef<PrinterCanvasHandle, PrinterCanvasProps>(
+    function PrinterCanvas({ sheet, status, currentSlot, cameraPreset = 'stream' }, ref) {
+        const containerRef = useRef<HTMLDivElement>(null);
+        const sceneRef = useRef<PrinterWorkshopScene | null>(null);
 
-    useEffect(() => {
-        if (!containerRef.current) return;
+        useImperativeHandle(ref, () => ({
+            printSlot(entry, durationSeconds, onComplete) {
+                sceneRef.current?.startPrintSlotAnimation(entry, durationSeconds, onComplete);
+            },
+            printSpecial(entry, durationSeconds, onComplete) {
+                sceneRef.current?.startPrintSpecialAnimation(entry, durationSeconds, onComplete);
+            },
+            ejectSheet(nextSheet, onComplete) {
+                sceneRef.current?.startEjectSheetAnimation(nextSheet, onComplete);
+            },
+            setCameraPreset(preset) {
+                sceneRef.current?.setCameraPreset(preset);
+            },
+        }));
 
-        // Khởi tạo Three.js scene
-        const scene = new PrinterWorkshopScene(containerRef.current);
-        sceneRef.current = scene;
+        useEffect(() => {
+            if (!containerRef.current) return;
 
-        // Render sheet ban đầu
-        scene.updateSheet(sheet);
-        scene.setPrinterStatus(status, currentSlot);
+            const scene = new PrinterWorkshopScene(containerRef.current);
+            sceneRef.current = scene;
 
-        return () => {
-            scene.dispose();
-            sceneRef.current = null;
-        };
-    }, []);
+            scene.updateSheet(sheet);
+            scene.setPrinterStatus(status, currentSlot);
 
-    // Cập nhật khi sheet thay đổi
-    useEffect(() => {
-        if (sceneRef.current) {
-            sceneRef.current.updateSheet(sheet);
-        }
-    }, [sheet]);
+            return () => {
+                scene.dispose();
+                sceneRef.current = null;
+            };
+        }, []);
 
-    // Cập nhật khi status thay đổi
-    useEffect(() => {
-        if (sceneRef.current) {
-            sceneRef.current.setPrinterStatus(status, currentSlot);
-        }
-    }, [status, currentSlot]);
+        useEffect(() => {
+            if (sceneRef.current) {
+                sceneRef.current.updateSheet(sheet);
+            }
+        }, [sheet]);
 
-    // Cập nhật khi camera preset thay đổi
-    useEffect(() => {
-        if (sceneRef.current) {
-            sceneRef.current.setCameraPreset(cameraPreset);
-        }
-    }, [cameraPreset]);
+        useEffect(() => {
+            if (sceneRef.current) {
+                sceneRef.current.setPrinterStatus(status, currentSlot);
+            }
+        }, [status, currentSlot]);
 
-    return (
-        <div
-            ref={containerRef}
-            style={{
-                width: '100%',
-                height: '100%',
-                overflow: 'hidden',
-                position: 'relative',
-            }}
-        />
-    );
-}
+        useEffect(() => {
+            if (sceneRef.current) {
+                sceneRef.current.setCameraPreset(cameraPreset);
+            }
+        }, [cameraPreset]);
 
+        return (
+            <div
+                ref={containerRef}
+                style={{
+                    width: '100%',
+                    height: '100%',
+                    overflow: 'hidden',
+                    position: 'relative',
+                }}
+            />
+        );
+    }
+);

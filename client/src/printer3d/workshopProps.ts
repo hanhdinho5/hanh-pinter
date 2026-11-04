@@ -423,3 +423,4 @@ export function createActionBadgesBar(): THREE.Mesh {
     mesh.position.set(0, 1.85, -0.6);
     return mesh;
 }
+

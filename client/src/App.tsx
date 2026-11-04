@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { PrinterCanvas } from './printer3d/PrinterCanvas';
+import { useState, useRef } from 'react';
+import { PrinterCanvas, type PrinterCanvasHandle } from './printer3d/PrinterCanvas';
 import { DevControls } from './components/DevControls';
 import { mockPartialSheet } from './printer3d/mockData';
 import type { Sheet, PrinterStatus } from './types';
@@ -9,6 +9,8 @@ export function App() {
     const [status, setStatus] = useState<PrinterStatus>('idle');
     const [cameraPreset, setCameraPreset] = useState<'stream' | 'closeup' | 'overview'>('stream');
     const [obsMode, setObsMode] = useState<boolean>(false);
+
+    const printerRef = useRef<PrinterCanvasHandle | null>(null);
 
     return (
         <main
@@ -40,12 +42,13 @@ export function App() {
                               overflow: 'hidden',
                               boxShadow: '0 20px 60px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.08)',
                               position: 'relative',
-                              backgroundColor: '#181412',
+                              backgroundColor: '#0e0a07',
                           }
                 }
             >
-                {/* Canvas Three.js */}
+                {/* Canvas Three.js có ref handle */}
                 <PrinterCanvas
+                    ref={printerRef}
                     sheet={sheet}
                     status={status}
                     currentSlot={sheet.entries.length}
@@ -76,7 +79,7 @@ export function App() {
                 )}
             </div>
 
-            {/* Bảng điều khiển thử nghiệm Giai đoạn 2 */}
+            {/* Bảng điều khiển thử nghiệm Giai đoạn 3 */}
             <DevControls
                 sheet={sheet}
                 setSheet={setSheet}
@@ -86,6 +89,7 @@ export function App() {
                 setCameraPreset={setCameraPreset}
                 obsMode={obsMode}
                 setObsMode={setObsMode}
+                printerRef={printerRef}
             />
         </main>
     );
