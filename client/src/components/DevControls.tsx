@@ -1,23 +1,20 @@
-import React, { useState } from 'react';
-import type { Sheet, PrinterStatus, SheetEntry } from '../types';
+import { useState } from 'react';
+import type { Sheet, PrinterStatus, SheetEntry, QueueState } from '../types';
 import type { PrinterCanvasHandle } from '../printer3d/PrinterCanvas';
-import {
-    mockPartialSheet,
-    mockFullSheet,
-    mockSpecialSheet,
-    mockEmptySheet,
-} from '../printer3d/mockData';
+import { api } from '../socket/socketClient';
 
 interface DevControlsProps {
     sheet: Sheet;
-    setSheet: React.Dispatch<React.SetStateAction<Sheet>>;
+    setSheet: (sheet: Sheet) => void;
     status: PrinterStatus;
-    setStatus: React.Dispatch<React.SetStateAction<PrinterStatus>>;
+    setStatus: (status: PrinterStatus) => void;
     cameraPreset: 'stream' | 'closeup' | 'overview';
     setCameraPreset: (preset: 'stream' | 'closeup' | 'overview') => void;
     obsMode: boolean;
     setObsMode: (val: boolean) => void;
     printerRef: React.RefObject<PrinterCanvasHandle | null>;
+    isConnected: boolean;
+    queueState: QueueState | null;
 }
 
 export function DevControls({
@@ -30,12 +27,79 @@ export function DevControls({
     obsMode,
     setObsMode,
     printerRef,
+    isConnected,
+    queueState,
 }: DevControlsProps) {
     const [collapsed, setCollapsed] = useState(false);
     const [isAnimating, setIsAnimating] = useState(false);
+    const [copySuccess, setCopySuccess] = useState(false);
 
-    // Kích hoạt hoạt ảnh in thử 1 avatar vào slot trống tiếp theo
-    const handleTriggerPrintAnimation = (isGold = false) => {
+    // Gửi sự kiện giả lập tới REST API của Backend Server
+    const handleSendRealEvent = async (type: 'COMMENT' | 'FOLLOW' | 'GIFT', isVip = false) => {
+        const randomNames = [
+            'alex_tiktok',
+            'cyber_kitty',
+            'hoang_anh_99',
+            'linh_dan_live',
+            'panda_bamboo',
+            'dragon_lord',
+            'phoenix_fire',
+            'tokyo_stream',
+        ];
+        const randomUser = randomNames[Math.floor(Math.random() * randomNames.length)];
+
+        try {
+            if (type === 'COMMENT') {
+                await api.sendMockComment(randomUser);
+            } else if (type === 'FOLLOW') {
+                await api.sendMockFollow(randomUser);
+            } else if (type === 'GIFT') {
+                if (isVip) {
+                    // Quà 1200 kim cương -> Full Page VIP
+                    await api.sendMockGift(randomUser, 'Lion_King', 1200);
+                } else {
+                    // Quà 150 kim cương -> Khung vàng
+                    await api.sendMockGift(randomUser, 'Rose_Bouquet', 150);
+                }
+            }
+        } catch (err) {
+            console.error('Failed to send mock event to server:', err);
+            alert('Không thể kết nối đến server backend (:3001). Bạn hãy đảm bảo server backend đang chạy!');
+        }
+    };
+
+    // Điều khiển Pause / Resume Backend Engine
+    const handleTogglePause = async () => {
+        try {
+            if (status === 'paused') {
+                await api.resume();
+            } else {
+                await api.pause();
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    // Điều khiển Tốc độ Backend Engine
+    const handleChangeSpeed = async (speed: number) => {
+        try {
+            await api.setSpeed(speed);
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    // Copy link OBS Browser Source
+    const handleCopyObsLink = () => {
+        const url = `${window.location.origin}/overlay`;
+        navigator.clipboard.writeText(url);
+        setCopySuccess(true);
+        setTimeout(() => setCopySuccess(false), 2000);
+    };
+
+    // Thử nghiệm hoạt ảnh Offline (không phụ thuộc server)
+    const handleTriggerOfflinePrint = (isGold = false) => {
         if (isAnimating || sheet.kind === 'special') return;
 
         const occupiedSlots = new Set(sheet.entries.map((e) => e.slot));
@@ -44,27 +108,15 @@ export function DevControls({
             nextSlot++;
         }
         if (nextSlot >= 6) {
-            alert('Tờ in hiện tại đã đủ 6 ô! Hãy bấm nút "Cuộn tờ mới" để đẩy tờ này đi.');
+            alert('Tờ in hiện tại đã đủ 6 ô! Bấm "Cuộn tờ mới" để sang tờ tiếp theo.');
             return;
         }
 
-        const randomNames = [
-            'alex_live',
-            'cyber_kitty',
-            'hoang_anh_99',
-            'linh_dan_live',
-            'panda_bamboo',
-            'dragon_lord',
-            'phoenix_fire',
-            'superstar_vn',
-        ];
-        const randomName = randomNames[Math.floor(Math.random() * randomNames.length)];
-
         const newEntry: SheetEntry = {
             slot: nextSlot,
-            jobId: `job-live-${Date.now()}`,
+            jobId: `job-offline-${Date.now()}`,
             userId: `user-${Date.now()}`,
-            username: isGold ? `${randomName}_vip` : randomName,
+            username: isGold ? 'golden_fan_vip' : 'stream_viewer',
             avatarUrl: null,
             frame: isGold ? 'gold' : 'normal',
         };
@@ -75,71 +127,11 @@ export function DevControls({
         printerRef.current?.printSlot(newEntry, 2.3, () => {
             setIsAnimating(false);
             setStatus('idle');
-            setSheet((prev) => ({
-                ...prev,
-                entries: [...prev.entries, newEntry].sort((a, b) => a.slot - b.slot),
-                completed: prev.entries.length + 1 >= 6,
-            }));
-        });
-    };
-
-    // Kích hoạt hoạt ảnh in Trang đặc biệt Full Page (VIP)
-    const handleTriggerFullPageAnimation = () => {
-        if (isAnimating) return;
-
-        const specialEntry: SheetEntry = {
-            slot: 0,
-            jobId: `job-vip-${Date.now()}`,
-            userId: `user-superstar`,
-            username: 'TIKTOK_SUPERSTAR',
-            avatarUrl: null,
-            frame: 'gold',
-        };
-
-        const newSpecialSheet: Sheet = {
-            id: sheet.id + 1,
-            kind: 'special',
-            capacity: 1,
-            completed: false,
-            entries: [],
-        };
-
-        setIsAnimating(true);
-        setStatus('printing');
-
-        // Đầu tiên cuộn tờ cũ ra và đưa tờ đặc biệt vào
-        printerRef.current?.ejectSheet(newSpecialSheet, () => {
-            setSheet(newSpecialSheet);
-
-            // Bắt đầu quét in toàn trang đặc biệt
-            printerRef.current?.printSpecial(specialEntry, 3.2, () => {
-                setIsAnimating(false);
-                setStatus('idle');
-                setSheet((prev) => ({
-                    ...prev,
-                    entries: [specialEntry],
-                    completed: true,
-                }));
+            setSheet({
+                ...sheet,
+                entries: [...sheet.entries, newEntry].sort((a, b) => a.slot - b.slot),
+                completed: sheet.entries.length + 1 >= 6,
             });
-        });
-    };
-
-    // Kích hoạt hoạt ảnh đẩy tờ cũ ra và kéo tờ mới vào
-    const handleTriggerEjectSheet = () => {
-        if (isAnimating) return;
-
-        const nextFreshSheet: Sheet = {
-            id: sheet.id + 1,
-            kind: 'standard',
-            capacity: 6,
-            completed: false,
-            entries: [],
-        };
-
-        setIsAnimating(true);
-        printerRef.current?.ejectSheet(nextFreshSheet, () => {
-            setIsAnimating(false);
-            setSheet(nextFreshSheet);
         });
     };
 
@@ -163,7 +155,7 @@ export function DevControls({
                     zIndex: 9999,
                 }}
             >
-                ⚙ Bảng điều khiển thử nghiệm (Phase 3: Hoạt ảnh)
+                ⚙ Bảng điều khiển (Phase 4: Realtime)
             </button>
         );
     }
@@ -174,20 +166,21 @@ export function DevControls({
                 position: 'fixed',
                 top: '16px',
                 right: '16px',
-                width: '330px',
+                width: '340px',
                 maxHeight: 'calc(100vh - 32px)',
                 overflowY: 'auto',
-                background: 'rgba(15, 23, 42, 0.94)',
-                backdropFilter: 'blur(12px)',
+                background: 'rgba(15, 23, 42, 0.95)',
+                backdropFilter: 'blur(14px)',
                 border: '1px solid #334155',
                 borderRadius: '12px',
                 padding: '16px',
                 color: '#e2e8f0',
                 fontSize: '13px',
-                boxShadow: '0 10px 30px rgba(0,0,0,0.6)',
+                boxShadow: '0 12px 36px rgba(0,0,0,0.7)',
                 zIndex: 9999,
             }}
         >
+            {/* Header & Trạng thái kết nối */}
             <div
                 style={{
                     display: 'flex',
@@ -200,10 +193,21 @@ export function DevControls({
             >
                 <div>
                     <h3 style={{ margin: 0, fontSize: '15px', color: '#38bdf8' }}>
-                        ⚙ Phase 3: Hoạt Ảnh Máy In
+                        ⚡ Phase 4: Realtime Engine
                     </h3>
-                    <div style={{ fontSize: '11px', color: '#94a3b8' }}>
-                        Quét dòng • Cuộn giấy • Hạt vàng VIP
+                    <div style={{ fontSize: '11px', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span
+                            style={{
+                                width: '8px',
+                                height: '8px',
+                                borderRadius: '50%',
+                                backgroundColor: isConnected ? '#10b981' : '#ef4444',
+                                display: 'inline-block',
+                            }}
+                        />
+                        <span style={{ color: isConnected ? '#10b981' : '#ef4444', fontWeight: 600 }}>
+                            {isConnected ? 'Đã kết nối Socket.IO (:3001)' : 'Mất kết nối server (:3001)'}
+                        </span>
                     </div>
                 </div>
                 <button
@@ -220,129 +224,151 @@ export function DevControls({
                 </button>
             </div>
 
-            {/* Mục 1: KÍCH HOẠT HOẠT ẢNH IN THỰC TẾ (CORE PHASE 3) */}
-            <div style={{ marginBottom: '16px', background: 'rgba(30, 41, 59, 0.5)', padding: '10px', borderRadius: '8px' }}>
+            {/* Trạng thái Queue thời gian thực từ Backend */}
+            <div
+                style={{
+                    marginBottom: '14px',
+                    padding: '8px 10px',
+                    background: 'rgba(30, 41, 59, 0.6)',
+                    borderRadius: '8px',
+                    border: '1px solid #334155',
+                }}
+            >
+                <div style={{ fontSize: '12px', fontWeight: 600, color: '#cbd5e1', marginBottom: '4px' }}>
+                    📊 Hàng đợi Backend (Queue):
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '12px' }}>
+                    <div>
+                        Ưu tiên (Gift): <strong style={{ color: '#fbbf24' }}>{queueState?.pendingPriority.length ?? 0}</strong>
+                    </div>
+                    <div>
+                        Miễn phí: <strong style={{ color: '#38bdf8' }}>{queueState?.pendingFree.length ?? 0}</strong>
+                    </div>
+                </div>
+            </div>
+
+            {/* MỤC 1: BẮN SỰ KIỆN THẬT QUA REST API VÀO BACKEND */}
+            <div style={{ marginBottom: '16px' }}>
                 <div style={{ fontWeight: 600, marginBottom: '8px', color: '#38bdf8' }}>
-                    🎬 Thử nghiệm Hoạt ảnh Real-time:
+                    🚀 Bắn Sự Kiện Khán Giả Thật (REST API):
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                        <button
+                            onClick={() => handleSendRealEvent('COMMENT')}
+                            style={actionBtnStyle('#0284c7', '#0369a1')}
+                        >
+                            💬 Giả lập Comment
+                        </button>
+                        <button
+                            onClick={() => handleSendRealEvent('FOLLOW')}
+                            style={actionBtnStyle('#7c3aed', '#6d28d9')}
+                        >
+                            ✨ Giả lập Follow
+                        </button>
+                    </div>
                     <button
-                        disabled={isAnimating || sheet.kind === 'special' || sheet.entries.length >= 6}
-                        onClick={() => handleTriggerPrintAnimation(false)}
-                        style={{
-                            ...actionBtnStyle,
-                            background: isAnimating ? '#334155' : '#2563eb',
-                            borderColor: '#3b82f6',
-                            cursor: isAnimating ? 'not-allowed' : 'pointer',
-                        }}
+                        onClick={() => handleSendRealEvent('GIFT', false)}
+                        style={actionBtnStyle('#d97706', '#b45309')}
                     >
-                        ▶ In 1 Avatar (Quét dòng laser xanh)
+                        🎁 Tặng Quà 150 Diamond (Khung vàng)
                     </button>
                     <button
-                        disabled={isAnimating || sheet.kind === 'special' || sheet.entries.length >= 6}
-                        onClick={() => handleTriggerPrintAnimation(true)}
-                        style={{
-                            ...actionBtnStyle,
-                            background: isAnimating ? '#334155' : '#d97706',
-                            borderColor: '#f59e0b',
-                            cursor: isAnimating ? 'not-allowed' : 'pointer',
-                        }}
+                        onClick={() => handleSendRealEvent('GIFT', true)}
+                        style={actionBtnStyle('#9333ea', '#7e22ce')}
                     >
-                        👑 In Khung Vàng (Quét vàng + Bắn hạt VIP)
-                    </button>
-                    <button
-                        disabled={isAnimating}
-                        onClick={handleTriggerEjectSheet}
-                        style={{
-                            ...actionBtnStyle,
-                            background: '#0d9488',
-                            borderColor: '#14b8a6',
-                        }}
-                    >
-                        📜 Cuộn tờ mới (Đẩy tờ cũ ra)
-                    </button>
-                    <button
-                        disabled={isAnimating}
-                        onClick={handleTriggerFullPageAnimation}
-                        style={{
-                            ...actionBtnStyle,
-                            background: '#9333ea',
-                            borderColor: '#a855f7',
-                        }}
-                    >
-                        ⭐ In Trang Đặc Biệt Full Page (VIP ≥ 1k)
+                        👑 Tặng Quà 1200 Diamond (Full Page VIP)
                     </button>
                 </div>
             </div>
 
-            {/* Mục 2: Mẫu dữ liệu tĩnh */}
+            {/* MỤC 2: ĐIỀU KHIỂN ENGINE MÁY IN (PAUSE / SPEED) */}
             <div style={{ marginBottom: '16px' }}>
                 <div style={{ fontWeight: 600, marginBottom: '6px', color: '#cbd5e1' }}>
-                    📄 Chuyển đổi mẫu dữ liệu tĩnh:
+                    ⚙ Điều khiển Máy In:
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
                     <button
-                        disabled={isAnimating}
-                        onClick={() => setSheet(mockPartialSheet)}
-                        style={btnStyle(sheet.id === mockPartialSheet.id)}
+                        onClick={handleTogglePause}
+                        style={{
+                            ...btnStyle(status === 'paused'),
+                            flex: 1,
+                            background: status === 'paused' ? '#10b981' : '#d97706',
+                            color: '#ffffff',
+                            fontWeight: 'bold',
+                        }}
                     >
-                        Tờ 4/6 ô
+                        {status === 'paused' ? '▶ Tiếp tục (Resume)' : '⏸ Tạm dừng (Pause)'}
                     </button>
-                    <button
-                        disabled={isAnimating}
-                        onClick={() => setSheet(mockFullSheet)}
-                        style={btnStyle(sheet.id === mockFullSheet.id)}
-                    >
-                        Đầy đủ 6/6 ô
+                </div>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                    <button onClick={() => handleChangeSpeed(1)} style={speedBtnStyle}>
+                        Tốc độ 1x
                     </button>
-                    <button
-                        disabled={isAnimating}
-                        onClick={() => setSheet(mockSpecialSheet)}
-                        style={btnStyle(sheet.kind === 'special')}
-                    >
-                        Trang VIP
+                    <button onClick={() => handleChangeSpeed(2)} style={speedBtnStyle}>
+                        Tốc độ 2x
                     </button>
-                    <button
-                        disabled={isAnimating}
-                        onClick={() => setSheet(mockEmptySheet)}
-                        style={btnStyle(sheet.id === mockEmptySheet.id && sheet.entries.length === 0)}
-                    >
-                        Tờ trắng 0/6
+                    <button onClick={() => handleChangeSpeed(4)} style={speedBtnStyle}>
+                        Tốc độ 4x
                     </button>
                 </div>
             </div>
 
-            {/* Mục 3: Trạng thái máy in */}
+            {/* MỤC 3: OBS BROWSER SOURCE OVERLAY */}
+            <div style={{ marginBottom: '16px', background: 'rgba(16, 185, 129, 0.1)', padding: '10px', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+                <div style={{ fontWeight: 600, marginBottom: '6px', color: '#10b981' }}>
+                    🎥 Nguồn OBS Browser Source (/overlay):
+                </div>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                    <a
+                        href="/overlay"
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                            ...actionBtnStyle('#059669', '#047857'),
+                            textDecoration: 'none',
+                            textAlign: 'center',
+                            flex: 1,
+                        }}
+                    >
+                        🔗 Mở trang /overlay
+                    </a>
+                    <button
+                        onClick={handleCopyObsLink}
+                        style={{
+                            ...actionBtnStyle('#0f766e', '#115e59'),
+                            flex: 1,
+                        }}
+                    >
+                        {copySuccess ? '✓ Đã copy!' : '📋 Copy URL OBS'}
+                    </button>
+                </div>
+            </div>
+
+            {/* MỤC 4: THỬ NGHIỆM HOẠT ẢNH OFFLINE */}
             <div style={{ marginBottom: '16px' }}>
                 <div style={{ fontWeight: 600, marginBottom: '6px', color: '#cbd5e1' }}>
-                    🚥 Đèn chiếu đầu in:
+                    🎬 Hoạt ảnh thử nghiệm Offline:
                 </div>
                 <div style={{ display: 'flex', gap: '6px' }}>
                     <button
                         disabled={isAnimating}
-                        onClick={() => setStatus('idle')}
-                        style={statusBtnStyle(status === 'idle', '#10b981')}
+                        onClick={() => handleTriggerOfflinePrint(false)}
+                        style={btnStyle(false)}
                     >
-                        Sẵn sàng
+                        In thường
                     </button>
                     <button
                         disabled={isAnimating}
-                        onClick={() => setStatus('printing')}
-                        style={statusBtnStyle(status === 'printing', '#38bdf8')}
+                        onClick={() => handleTriggerOfflinePrint(true)}
+                        style={btnStyle(false)}
                     >
-                        Đang in
-                    </button>
-                    <button
-                        disabled={isAnimating}
-                        onClick={() => setStatus('paused')}
-                        style={statusBtnStyle(status === 'paused', '#f59e0b')}
-                    >
-                        Tạm dừng
+                        In vàng (VIP)
                     </button>
                 </div>
             </div>
 
-            {/* Mục 4: Góc nhìn Camera */}
+            {/* MỤC 5: GÓC NHÌN CAMERA */}
             <div style={{ marginBottom: '16px' }}>
                 <div style={{ fontWeight: 600, marginBottom: '6px', color: '#cbd5e1' }}>
                     🎥 Góc nhìn Camera:
@@ -369,7 +395,7 @@ export function DevControls({
                 </div>
             </div>
 
-            {/* Mục 5: Chế độ hiển thị OBS */}
+            {/* MỤC 6: CHẾ ĐỘ HIỂN THỊ */}
             <div style={{ borderTop: '1px solid #334155', paddingTop: '10px' }}>
                 <label
                     style={{
@@ -386,7 +412,7 @@ export function DevControls({
                         onChange={(e) => setObsMode(e.target.checked)}
                         style={{ cursor: 'pointer' }}
                     />
-                    <span>Chế độ toàn màn hình OBS (1080×1920)</span>
+                    <span>Chế độ toàn màn hình xem trước (1080×1920)</span>
                 </label>
             </div>
         </aside>
@@ -403,31 +429,30 @@ const btnStyle = (active: boolean): React.CSSProperties => ({
     fontWeight: active ? 600 : 500,
     cursor: 'pointer',
     textAlign: 'center',
+    flex: 1,
 });
 
-const actionBtnStyle: React.CSSProperties = {
-    padding: '9px 12px',
+const actionBtnStyle = (bg: string, hoverBg: string): React.CSSProperties => ({
+    padding: '8px 10px',
+    background: bg,
     color: '#ffffff',
-    border: '1px solid transparent',
-    borderRadius: '6px',
-    fontSize: '12px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    textAlign: 'left',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-};
-
-const statusBtnStyle = (active: boolean, color: string): React.CSSProperties => ({
-    flex: 1,
-    padding: '7px 8px',
-    background: active ? color : '#1e293b',
-    color: active ? '#0f172a' : '#cbd5e1',
-    border: `1px solid ${active ? color : '#334155'}`,
+    border: `1px solid ${hoverBg}`,
     borderRadius: '6px',
     fontSize: '12px',
     fontWeight: 600,
     cursor: 'pointer',
     textAlign: 'center',
 });
+
+const speedBtnStyle: React.CSSProperties = {
+    flex: 1,
+    padding: '6px',
+    background: '#1e293b',
+    color: '#cbd5e1',
+    border: '1px solid #334155',
+    borderRadius: '6px',
+    fontSize: '11px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    textAlign: 'center',
+};

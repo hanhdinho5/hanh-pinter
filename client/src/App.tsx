@@ -1,16 +1,82 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { PrinterCanvas, type PrinterCanvasHandle } from './printer3d/PrinterCanvas';
 import { DevControls } from './components/DevControls';
+import { OverlayView } from './components/OverlayView';
+import { usePrinterSocket } from './socket/usePrinterSocket';
 import { mockPartialSheet } from './printer3d/mockData';
-import type { Sheet, PrinterStatus } from './types';
+import type { Sheet, SheetEntry, PrintJob } from './types';
 
 export function App() {
+    // 1. Kiểm tra xem người dùng đang mở trang OBS Overlay (/overlay) hay trang Dashboard (/)
+    const isOverlayRoute =
+        window.location.pathname === '/overlay' ||
+        window.location.search.includes('overlay=true');
+
+    if (isOverlayRoute) {
+        return <OverlayView />;
+    }
+
+    return <DashboardView />;
+}
+
+function DashboardView() {
     const [sheet, setSheet] = useState<Sheet>(mockPartialSheet);
-    const [status, setStatus] = useState<PrinterStatus>('idle');
     const [cameraPreset, setCameraPreset] = useState<'stream' | 'closeup' | 'overview'>('stream');
     const [obsMode, setObsMode] = useState<boolean>(false);
 
     const printerRef = useRef<PrinterCanvasHandle | null>(null);
+    const isPrintingRef = useRef(false);
+
+    // 2. Kết nối Socket.IO thời gian thực với Server (:3001)
+    const { isConnected, currentSheet, queueState, status, setStatus } = usePrinterSocket({
+        onJobStarted: (job: PrintJob, durationSeconds: number) => {
+            isPrintingRef.current = true;
+
+            const entry: SheetEntry = {
+                slot: job.slot ?? 0,
+                jobId: job.id,
+                userId: job.userId,
+                username: job.username,
+                avatarUrl: job.avatarUrl,
+                frame: job.frame,
+            };
+
+            if (job.kind === 'fullPage') {
+                printerRef.current?.printSpecial(entry, durationSeconds, () => {
+                    isPrintingRef.current = false;
+                });
+            } else {
+                printerRef.current?.printSlot(entry, durationSeconds, () => {
+                    isPrintingRef.current = false;
+                });
+            }
+        },
+        onSheetCompleted: (completedSheet: Sheet) => {
+            const nextSheet: Sheet = {
+                id: completedSheet.id + 1,
+                kind: 'standard',
+                capacity: 6,
+                entries: [],
+                completed: false,
+            };
+
+            printerRef.current?.ejectSheet(nextSheet, () => {
+                setSheet(nextSheet);
+            });
+        },
+        onSheetUpdate: (updatedSheet: Sheet) => {
+            if (!isPrintingRef.current) {
+                setSheet(updatedSheet);
+            }
+        },
+    });
+
+    // Đồng bộ snapshot ban đầu từ backend
+    useEffect(() => {
+        if (currentSheet && !isPrintingRef.current) {
+            setSheet(currentSheet);
+        }
+    }, [currentSheet]);
 
     return (
         <main
@@ -46,7 +112,6 @@ export function App() {
                           }
                 }
             >
-                {/* Canvas Three.js có ref handle */}
                 <PrinterCanvas
                     ref={printerRef}
                     sheet={sheet}
@@ -55,7 +120,7 @@ export function App() {
                     cameraPreset={cameraPreset}
                 />
 
-                {/* Badge Overlay góc trên hiển thị độ phân giải / tỉ lệ */}
+                {/* Badge Overlay góc trên hiển thị trạng thái */}
                 {!obsMode && (
                     <div
                         style={{
@@ -63,33 +128,46 @@ export function App() {
                             top: '12px',
                             left: '12px',
                             padding: '4px 10px',
-                            background: 'rgba(15, 23, 42, 0.75)',
+                            background: 'rgba(15, 23, 42, 0.85)',
                             backdropFilter: 'blur(8px)',
-                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                            border: `1px solid ${isConnected ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
                             borderRadius: '6px',
                             fontSize: '11px',
                             fontWeight: 600,
                             letterSpacing: '0.5px',
-                            color: '#38bdf8',
+                            color: isConnected ? '#10b981' : '#f87171',
                             pointerEvents: 'none',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
                         }}
                     >
-                        ● 9:16 LIVE OVERLAY PREVIEW
+                        <span
+                            style={{
+                                width: '6px',
+                                height: '6px',
+                                borderRadius: '50%',
+                                backgroundColor: isConnected ? '#10b981' : '#ef4444',
+                            }}
+                        />
+                        {isConnected ? 'LIVE SYNC :3001' : 'OFFLINE MODE'}
                     </div>
                 )}
             </div>
 
-            {/* Bảng điều khiển thử nghiệm Giai đoạn 3 */}
+            {/* Bảng điều khiển thử nghiệm Giai đoạn 4 */}
             <DevControls
                 sheet={sheet}
                 setSheet={setSheet}
                 status={status}
-                setStatus={setStatus}
+                setStatus={setStatus ?? (() => {})}
                 cameraPreset={cameraPreset}
                 setCameraPreset={setCameraPreset}
                 obsMode={obsMode}
                 setObsMode={setObsMode}
                 printerRef={printerRef}
+                isConnected={isConnected}
+                queueState={queueState}
             />
         </main>
     );
