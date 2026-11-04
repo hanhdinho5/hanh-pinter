@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Sheet, PrinterStatus, SheetEntry, QueueState } from '../types';
+import type { Sheet, PrinterStatus, SheetEntry, QueueState, TikTokStatus } from '../types';
 import type { PrinterCanvasHandle } from '../printer3d/PrinterCanvas';
 import { api } from '../socket/socketClient';
 
@@ -15,6 +15,7 @@ interface DevControlsProps {
     printerRef: React.RefObject<PrinterCanvasHandle | null>;
     isConnected: boolean;
     queueState: QueueState | null;
+    tiktokStatus: TikTokStatus | null;
 }
 
 export function DevControls({
@@ -29,10 +30,39 @@ export function DevControls({
     printerRef,
     isConnected,
     queueState,
+    tiktokStatus,
 }: DevControlsProps) {
     const [collapsed, setCollapsed] = useState(false);
     const [isAnimating, setIsAnimating] = useState(false);
     const [copySuccess, setCopySuccess] = useState(false);
+    const [tiktokInput, setTiktokInput] = useState('');
+    const [isConnectingTikTok, setIsConnectingTikTok] = useState(false);
+
+    // Kết nối TikTok LIVE thật
+    const handleConnectTikTok = async () => {
+        if (!tiktokInput.trim()) return;
+        setIsConnectingTikTok(true);
+        try {
+            const res = await api.connectTikTok(tiktokInput.trim());
+            if (!res.success && res.message) {
+                alert(`Không thể kết nối TikTok LIVE: ${res.message}`);
+            }
+        } catch (err) {
+            console.error('Lỗi khi gọi API kết nối TikTok:', err);
+            alert('Lỗi kết nối tới backend server');
+        } finally {
+            setIsConnectingTikTok(false);
+        }
+    };
+
+    // Ngắt kết nối TikTok LIVE
+    const handleDisconnectTikTok = async () => {
+        try {
+            await api.disconnectTikTok();
+        } catch (err) {
+            console.error('Lỗi khi ngắt kết nối TikTok:', err);
+        }
+    };
 
     // Gửi sự kiện giả lập tới REST API của Backend Server
     const handleSendRealEvent = async (type: 'COMMENT' | 'FOLLOW' | 'GIFT', isVip = false) => {
@@ -245,6 +275,105 @@ export function DevControls({
                         Miễn phí: <strong style={{ color: '#38bdf8' }}>{queueState?.pendingFree.length ?? 0}</strong>
                     </div>
                 </div>
+            </div>
+
+            {/* MỤC: KẾT NỐI TIKTOK LIVE TRỰC TIẾP (PHASE 5) */}
+            <div
+                style={{
+                    marginBottom: '16px',
+                    background: 'rgba(236, 72, 153, 0.1)',
+                    padding: '12px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(236, 72, 153, 0.3)',
+                }}
+            >
+                <div
+                    style={{
+                        fontWeight: 600,
+                        marginBottom: '8px',
+                        color: '#f43f5e',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                    }}
+                >
+                    <span>🔴 Kết Nối TikTok LIVE:</span>
+                    <span
+                        style={{
+                            fontSize: '11px',
+                            color:
+                                tiktokStatus?.status === 'connected'
+                                    ? '#10b981'
+                                    : tiktokStatus?.status === 'connecting'
+                                    ? '#fbbf24'
+                                    : '#94a3b8',
+                            fontWeight: 600,
+                        }}
+                    >
+                        {tiktokStatus?.status === 'connected'
+                            ? '● ĐANG LIVE'
+                            : tiktokStatus?.status === 'connecting'
+                            ? '⏳ ĐANG KẾT NỐI...'
+                            : tiktokStatus?.status === 'reconnecting'
+                            ? `🔄 THỬ LẠI (${tiktokStatus.reconnectAttempts})...`
+                            : '⚪ CHƯA KẾT NỐI'}
+                    </span>
+                </div>
+                <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+                    <input
+                        type="text"
+                        placeholder="@username tiktok"
+                        value={tiktokInput}
+                        onChange={(e) => setTiktokInput(e.target.value)}
+                        disabled={tiktokStatus?.status === 'connected'}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') void handleConnectTikTok();
+                        }}
+                        style={{
+                            flex: 1,
+                            padding: '6px 10px',
+                            background: '#0f172a',
+                            border: '1px solid #334155',
+                            borderRadius: '6px',
+                            color: '#ffffff',
+                            fontSize: '12px',
+                        }}
+                    />
+                    {tiktokStatus?.status === 'connected' ? (
+                        <button
+                            onClick={handleDisconnectTikTok}
+                            style={{
+                                ...actionBtnStyle('#ef4444', '#dc2626'),
+                                padding: '6px 12px',
+                            }}
+                        >
+                            Ngắt
+                        </button>
+                    ) : (
+                        <button
+                            onClick={handleConnectTikTok}
+                            disabled={isConnectingTikTok || !tiktokInput.trim()}
+                            style={{
+                                ...actionBtnStyle('#e11d48', '#be123c'),
+                                padding: '6px 12px',
+                                opacity: isConnectingTikTok || !tiktokInput.trim() ? 0.6 : 1,
+                            }}
+                        >
+                            {isConnectingTikTok ? '...' : 'Kết nối'}
+                        </button>
+                    )}
+                </div>
+                {tiktokStatus?.error && (
+                    <div style={{ fontSize: '11px', color: '#f87171', marginTop: '4px' }}>
+                        ⚠️ {tiktokStatus.error}
+                    </div>
+                )}
+                {tiktokStatus?.status === 'connected' && (
+                    <div style={{ fontSize: '11px', color: '#10b981', marginTop: '4px' }}>
+                        ✓ Đang nhận live từ @{tiktokStatus.username}
+                        {tiktokStatus.roomId ? ` (Room: ${tiktokStatus.roomId})` : ''}
+                    </div>
+                )}
             </div>
 
             {/* MỤC 1: BẮN SỰ KIỆN THẬT QUA REST API VÀO BACKEND */}

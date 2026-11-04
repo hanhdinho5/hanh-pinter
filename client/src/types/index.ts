@@ -70,6 +70,16 @@ export interface QueueState {
     recentCompleted: PrintJob[];
 }
 
+export type TikTokConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+
+export interface TikTokStatus {
+    status: TikTokConnectionStatus;
+    username: string | null;
+    roomId: string | null;
+    error: string | null;
+    reconnectAttempts: number;
+}
+
 export interface RealtimeEventMap {
     'printer:state': [PrinterState];
     'printer:job:started': [PrintJob];
@@ -79,5 +89,6 @@ export interface RealtimeEventMap {
     'printer:sheet:completed': [Sheet];
     queue: [QueueState];
     event: [ViewerEvent];
+    'tiktok:status': [TikTokStatus];
 }
 

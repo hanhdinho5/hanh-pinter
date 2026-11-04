@@ -23,6 +23,7 @@ export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
     const [queueState, setQueueState] = useState<QueueState | null>(null);
     const [status, setStatus] = useState<PrinterStatus>('idle');
     const [recentEvents, setRecentEvents] = useState<ViewerEvent[]>([]);
+    const [tiktokStatus, setTiktokStatus] = useState<import('../types').TikTokStatus | null>(null);
 
     const optionsRef = useRef(options);
     optionsRef.current = options;
@@ -80,6 +81,10 @@ export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
             optionsRef.current.onSheetCompleted?.(sheet);
         };
 
+        const onTikTokStatus = (status: import('../types').TikTokStatus) => {
+            setTiktokStatus(status);
+        };
+
         socket.on('connect', onConnect);
         socket.on('disconnect', onDisconnect);
         // Cast event handlers through socket's on method
@@ -92,6 +97,7 @@ export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
         rawSocket.on('printer:job:started', onJobStarted);
         rawSocket.on('printer:job:completed', onJobCompleted);
         rawSocket.on('printer:sheet:completed', onSheetCompleted);
+        rawSocket.on('tiktok:status', onTikTokStatus);
 
         if (socket.connected) {
             setIsConnected(true);
@@ -107,6 +113,7 @@ export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
             rawSocket.off('printer:job:started', onJobStarted);
             rawSocket.off('printer:job:completed', onJobCompleted);
             rawSocket.off('printer:sheet:completed', onSheetCompleted);
+            rawSocket.off('tiktok:status', onTikTokStatus);
         };
     }, []);
 
@@ -118,5 +125,6 @@ export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
         status,
         setStatus,
         recentEvents,
+        tiktokStatus,
     };
 }

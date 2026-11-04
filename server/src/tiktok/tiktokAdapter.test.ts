@@ -1,0 +1,51 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { extractUser, extractAvatarUrl } from './tiktokAdapter.js';
+
+test('extractUser trích xuất chính xác userId và username từ các cấu trúc dữ liệu TikTok', () => {
+    // Trường hợp 1: Dữ liệu phẳng
+    const u1 = extractUser({ userId: '123456', uniqueId: 'alex_gamer' });
+    assert.equal(u1.userId, '123456');
+    assert.equal(u1.username, 'alex_gamer');
+
+    // Trường hợp 2: Lấy nickname khi không có uniqueId
+    const u2 = extractUser({ userId: 789, nickname: 'Alex VIP' });
+    assert.equal(u2.userId, '789');
+    assert.equal(u2.username, 'Alex VIP');
+
+    // Trường hợp 3: Dữ liệu lồng trong user object
+    const u3 = extractUser({ user: { id: '999', uniqueId: 'nested_user' } });
+    assert.equal(u3.userId, '999');
+    assert.equal(u3.username, 'nested_user');
+
+    // Trường hợp 4: Fallback khi rỗng
+    const u4 = extractUser(null);
+    assert.equal(u4.userId, 'anonymous');
+    assert.equal(u4.username, 'Viewer');
+});
+
+test('extractAvatarUrl trích xuất avatar theo độ ưu tiên', () => {
+    // 1. profilePictureUrl chuỗi trực tiếp
+    const a1 = extractAvatarUrl({ profilePictureUrl: 'https://p16.tiktokcdn.com/avatar1.jpg' });
+    assert.equal(a1, 'https://p16.tiktokcdn.com/avatar1.jpg');
+
+    // 2. Mảng profilePictureUrls
+    const a2 = extractAvatarUrl({ profilePictureUrls: ['https://p16.tiktokcdn.com/avatar2.jpg'] });
+    assert.equal(a2, 'https://p16.tiktokcdn.com/avatar2.jpg');
+
+    // 3. userDetails.profilePictureUrls
+    const a3 = extractAvatarUrl({
+        userDetails: { profilePictureUrls: ['https://p16.tiktokcdn.com/avatar3.jpg'] },
+    });
+    assert.equal(a3, 'https://p16.tiktokcdn.com/avatar3.jpg');
+
+    // 4. user.avatarThumb.urlList
+    const a4 = extractAvatarUrl({
+        user: { avatarThumb: { urlList: ['https://p16.tiktokcdn.com/avatar4.jpg'] } },
+    });
+    assert.equal(a4, 'https://p16.tiktokcdn.com/avatar4.jpg');
+
+    // 5. Fallback khi không có
+    const a5 = extractAvatarUrl({});
+    assert.equal(a5, null);
+});

@@ -54,7 +54,7 @@ const parseEvent = (raw: unknown, type: NewEventInput['type']): NewEventInput =>
 
 export const createRouter = (core: Core): Router => {
     const router = Router();
-    const { engine, queue, handler } = core;
+    const { engine, queue, handler, tiktok } = core;
 
     router.get('/health', (_req, res) => {
         res.json({ status: 'ok', uptime: process.uptime() });
@@ -64,6 +64,30 @@ export const createRouter = (core: Core): Router => {
     });
     router.get('/queue', (_req, res) => {
         res.json(queue.snapshot());
+    });
+
+    // --- TikTok Live Adapter Routes ---
+    router.get('/tiktok/status', (_req, res) => {
+        res.json(tiktok.getStatus());
+    });
+    router.post('/tiktok/connect', async (req, res, next) => {
+        try {
+            if (!isRecord(req.body)) throw new HttpError(400, 'Body phải là JSON object');
+            const username = str(req.body, 'username', true);
+            if (!username) throw new HttpError(400, 'Thiếu username TikTok');
+            const result = await tiktok.connect(username);
+            res.json({ ...result, status: tiktok.getStatus() });
+        } catch (err) {
+            next(err);
+        }
+    });
+    router.post('/tiktok/disconnect', async (_req, res, next) => {
+        try {
+            await tiktok.disconnect();
+            res.json({ success: true, status: tiktok.getStatus() });
+        } catch (err) {
+            next(err);
+        }
     });
 
     router.post('/printer/pause', (_req, res) => {

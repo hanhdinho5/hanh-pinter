@@ -28,7 +28,7 @@ function DashboardView() {
     const isPrintingRef = useRef(false);
 
     // 2. Kết nối Socket.IO thời gian thực với Server (:3001)
-    const { isConnected, currentSheet, queueState, status, setStatus } = usePrinterSocket({
+    const { isConnected, currentSheet, queueState, status, setStatus, tiktokStatus } = usePrinterSocket({
         onJobStarted: (job: PrintJob, durationSeconds: number) => {
             isPrintingRef.current = true;
 
@@ -168,6 +168,7 @@ function DashboardView() {
                 printerRef={printerRef}
                 isConnected={isConnected}
                 queueState={queueState}
+                tiktokStatus={tiktokStatus}
             />
         </main>
     );

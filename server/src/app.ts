@@ -4,6 +4,7 @@ import { EventHandler } from './events/eventHandler.js';
 import { PrinterEngine } from './printer/printerEngine.js';
 import { SheetManager } from './printer/sheetManager.js';
 import { PrintQueue } from './queue/printQueue.js';
+import { TikTokAdapter } from './tiktok/tiktokAdapter.js';
 
 export interface Core {
     bus: Bus;
@@ -11,6 +12,7 @@ export interface Core {
     sheets: SheetManager;
     engine: PrinterEngine;
     handler: EventHandler;
+    tiktok: TikTokAdapter;
 }
 
 /** Lắp ráp lõi (không có HTTP/socket) để dùng cho app thật và test. */
@@ -20,5 +22,6 @@ export const createCore = (cfg: AppConfig = config): Core => {
     const sheets = new SheetManager(cfg.printer.sheetCapacity);
     const engine = new PrinterEngine(queue, sheets, bus, cfg.printer);
     const handler = new EventHandler(queue, sheets, engine, bus, cfg.gift);
-    return { bus, queue, sheets, engine, handler };
+    const tiktok = new TikTokAdapter(handler, bus);
+    return { bus, queue, sheets, engine, handler, tiktok };
 };

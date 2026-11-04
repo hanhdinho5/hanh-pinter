@@ -71,6 +71,16 @@ export interface QueueState {
     recentCompleted: PrintJob[];
 }
 
+export type TikTokConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+
+export interface TikTokStatus {
+    status: TikTokConnectionStatus;
+    username: string | null;
+    roomId: string | null;
+    error: string | null;
+    reconnectAttempts: number;
+}
+
 /** Nguồn sự thật duy nhất cho tên + payload của các sự kiện realtime. */
 export interface RealtimeEventMap {
     'printer:state': [PrinterState];
@@ -81,6 +91,7 @@ export interface RealtimeEventMap {
     'printer:sheet:completed': [Sheet];
     queue: [QueueState];
     event: [ViewerEvent];
+    'tiktok:status': [TikTokStatus];
 }
 
 export type ServerToClientEvents = {

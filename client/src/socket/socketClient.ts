@@ -92,5 +92,24 @@ export const api = {
         const res = await fetch(`${serverUrl}/api/printer/state`);
         return res.json();
     },
+    async connectTikTok(username: string, serverUrl = DEFAULT_SERVER_URL) {
+        const res = await fetch(`${serverUrl}/api/tiktok/connect`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username }),
+        });
+        return res.json();
+    },
+    async disconnectTikTok(serverUrl = DEFAULT_SERVER_URL) {
+        const res = await fetch(`${serverUrl}/api/tiktok/disconnect`, {
+            method: 'POST',
+        });
+        return res.json();
+    },
+    async getTikTokStatus(serverUrl = DEFAULT_SERVER_URL) {
+        const res = await fetch(`${serverUrl}/api/tiktok/status`);
+        return res.json();
+    },
 };
 export type { ViewerEvent };
+

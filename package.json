@@ -12,12 +12,6 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "^11.22.0",
-      "onFail": "download"
-    }
-  },
+  "packageManager": "pnpm@11.28.10",
   "type": "module"
 }

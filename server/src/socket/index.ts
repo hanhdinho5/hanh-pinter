@@ -12,6 +12,7 @@ const FORWARDED: (keyof RealtimeEventMap)[] = [
     'printer:sheet:completed',
     'queue',
     'event',
+    'tiktok:status',
 ];
 
 export const createSocketServer = (httpServer: HttpServer, core: Core, origin: string) => {
@@ -33,6 +34,7 @@ export const createSocketServer = (httpServer: HttpServer, core: Core, origin: s
         socket.emit('printer:state', core.engine.getState());
         socket.emit('printer:sheet', core.sheets.current);
         socket.emit('queue', core.queue.snapshot());
+        socket.emit('tiktok:status', core.tiktok.getStatus());
         socket.on('disconnect', () => console.log('Client disconnected:', socket.id));
     });
 
