@@ -57,7 +57,28 @@ Phần lõi chạy hoàn chỉnh, không phụ thuộc TikTok.
 
 ---
 
-### Giai đoạn 3: Hoạt ảnh & Hiệu ứng (Three.js Animation) - [TIẾP THEO]
+### Giai đoạn 3: Hoạt ảnh & Hiệu ứng (Three.js Animation) - [HOÀN TẤT]
+- Đầu in di chuyển: Cụm đầu in (carriage) quét zigzag theo trục X qua lại đúng vị trí cột ô đang in (hoặc quét toàn khổ đối với trang đặc biệt).
+- Avatar hiện dần theo từng dòng (Progressive Line-by-line / Dither Print Reveal):
+  - CanvasTexture cắt clip theo tiến trình in (`progress: 0 -> 1`).
+  - Tia quét Laser Scanline phát sáng màu xanh cyan rực rỡ (khung thường) hoặc vàng hoàng gia (khung vàng) kèm các hạt chấm dither nhiệt mô phỏng in kim ảo.
+- Cuộn & nạp giấy (Paper Roll / Eject Animation):
+  - Khi tờ giấy đủ 6 ô hoặc khi có lệnh cuộn tờ mới: tờ giấy cũ trượt vút về phía trước và rơi nhẹ khỏi bàn; tờ giấy mới trắng tinh chui ra từ dưới dầm ngang máy in trượt vào vị trí chuẩn.
+- Hiệu ứng khung vàng (Gold Frame Sparkles):
+  - Viền vàng lấp lánh có hiệu ứng quét ánh kim (gleam sweep).
+  - Hệ thống hạt `SparkleParticleSystem`: bùng nổ 40-50 ngôi sao vàng óng ánh bay tỏa lên trên và rơi xuống mặt bàn khi in xong ô vàng.
+- Hiệu ứng Trang đặc biệt (Full Page VIP):
+  - Đẩy nhanh tờ cũ, nạp tờ giấy đặc biệt, đầu in quét toàn bộ diện tích rộng với dải sáng vàng.
+  - Pháo hoa ánh kim hoàng gia (Grand VIP celebration) bùng nổ khi in xong.
+- Tích hợp điều khiển qua `DevControls`:
+  - Nút "▶ In 1 Avatar (Quét dòng laser xanh)"
+  - Nút "👑 In Khung Vàng (Quét vàng + Bắn hạt VIP)"
+  - Nút "📜 Cuộn tờ mới (Đẩy tờ cũ ra)"
+  - Nút "⭐ In Trang Đặc Biệt Full Page (VIP ≥ 1k)"
+
+---
+
+### Giai đoạn 4: Realtime (Socket.IO Client & Overlay OBS) - [TIẾP THEO]
 - Đầu in di chuyển theo trục X/Y trên vị trí ô đang in.
 - Avatar hiện dần theo từng dòng (quét in từ trên xuống dưới / dither print effect).
 - Giấy cuộn/đẩy ra từ khe máy in khi đủ 6 ảnh (hoặc khi đẩy tờ dở).
