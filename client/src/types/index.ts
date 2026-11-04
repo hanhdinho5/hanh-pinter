@@ -80,3 +80,4 @@ export interface RealtimeEventMap {
     queue: [QueueState];
     event: [ViewerEvent];
 }
+

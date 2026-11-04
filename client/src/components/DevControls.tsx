@@ -325,3 +325,4 @@ const statusBtnStyle = (active: boolean, color: string): React.CSSProperties => 
     cursor: 'pointer',
     textAlign: 'center',
 });
+
