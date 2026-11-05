@@ -593,7 +593,7 @@ export function DevControls({
                         onClick={() => handleTestSfx('printer')}
                         style={{ ...speedBtnStyle, fontSize: '10px' }}
                     >
-                        🔊 Thử Máy In
+                        ✏️ Thử Tiếng Cọ Giấy
                     </button>
                     <button
                         onClick={() => handleTestSfx('gold')}

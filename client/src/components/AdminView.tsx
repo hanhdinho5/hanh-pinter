@@ -247,7 +247,7 @@ export function AdminView() {
                                 setTimeout(() => soundManager.stopPrintSound(), 1800);
                             }}
                         >
-                            🔊 Thử máy in
+                            ✏️ Thử tiếng cọ giấy
                         </button>
                         <button
                             style={btn('#475569')}

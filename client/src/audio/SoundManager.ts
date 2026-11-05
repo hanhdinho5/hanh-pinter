@@ -1,9 +1,11 @@
 /**
  * Quản lý âm thanh cho máy in 3D:
- * 1. Tiếng máy in (SFX): Tiếng motor bước / in nhiệt êm dịu, tiếng chuông vàng VIP, tiếng cuộn giấy.
- *    - Sử dụng Web Audio API để tự tổng hợp âm thanh chân thực (chạy ngay lập tức, không phụ thuộc file mạng).
- *    - Đồng thời hỗ trợ nạp file .mp3 từ thư mục public/sounds/ nếu người dùng muốn dùng file thu âm thật.
- * 2. Nhạc nền (BGM): Tự động phát lặp các bài nhạc lofi/thư giãn từ public/music/, có điều khiển âm lượng.
+ * 1. Hiệu ứng âm thanh (SFX):
+ *    - Tiếng nét bút / cọ ma sát sột soạt trên bề mặt giấy (Paper Friction / Pencil Sketching ASMR).
+ *    - Tiếng chuông vàng lấp lánh khi in thẻ VIP, tiếng cuộn giấy khi tống trang.
+ *    - Sử dụng Web Audio API để tự tổng hợp âm thanh chân thực (chạy mượt mà, không phụ thuộc mạng).
+ *    - Đồng thời hỗ trợ nạp file .mp3 từ thư mục client/public/sounds/ nếu người dùng muốn dùng file thu âm thật.
+ * 2. Nhạc nền (BGM): Tự động phát lặp các bài nhạc lofi/thư giãn từ client/public/music/, có điều khiển âm lượng.
  */
 class SoundManager {
     private ctx: AudioContext | null = null;
@@ -11,10 +13,9 @@ class SoundManager {
     private bgmVolume = 0.35;
     private isMuted = false;
 
-    // Bộ tổng hợp tiếng motor bước (Stepper Motor Synth)
-    private printMotorOsc1: OscillatorNode | null = null;
-    private printMotorOsc2: OscillatorNode | null = null;
-    private printNoiseNode: AudioBufferSourceNode | null = null;
+    // Bộ tổng hợp âm thanh bút cọ trên bề mặt giấy (Paper Friction / Sketching Synth)
+    private paperNoiseSource: AudioBufferSourceNode | null = null;
+    private paperStrokeLFO: OscillatorNode | null = null;
     private printGainNode: GainNode | null = null;
     private isPrintingSoundActive = false;
 
@@ -56,39 +57,49 @@ class SoundManager {
     }
 
     // =========================================================================
-    // SFX: TIẾNG MÁY IN ĐỘNG CƠ BƯỚC / IN KIM ẢO
+    // SFX: TIẾNG BÚT CỌ VÀO GIẤY / NÉT VẼ TỰ NHIÊN (PAPER FRICTION & SKETCHING)
     // =========================================================================
 
     /**
-     * Bật tiếng máy in chạy êm dịu khi đầu in bắt đầu quét
+     * Bật âm thanh nét bút / cọ ma sát trên bề mặt giấy (Paper Friction / Sketching sound)
      */
     public startPrintSound(isGold = false): void {
         if (this.isMuted || this.isPrintingSoundActive) return;
 
-        // Thử phát file mp3 nếu người dùng đã bỏ file vào public/sounds/
-        const customAudio = new Audio('/sounds/printer-working.mp3');
-        customAudio.volume = this.sfxVolume;
-        customAudio.loop = true;
+        // Thử phát file mp3 nếu người dùng đã bỏ file thu âm vào client/public/sounds/
+        // Ưu tiên paper-friction.mp3, kế đến là printer-working.mp3
+        const tryPlayFile = (path: string, fallback: () => void) => {
+            const customAudio = new Audio(path);
+            customAudio.volume = this.sfxVolume;
+            customAudio.loop = true;
 
-        const playPromise = customAudio.play();
-        if (playPromise) {
-            playPromise
-                .then(() => {
-                    this.isPrintingSoundActive = true;
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    (this as any)._customPrintAudio = customAudio;
-                })
-                .catch(() => {
-                    // Nếu chưa có file mp3 thì dùng bộ tổng hợp âm thanh Web Audio API
-                    this.startSynthesizedPrintSound(isGold);
-                });
-        } else {
-            this.startSynthesizedPrintSound(isGold);
-        }
+            const playPromise = customAudio.play();
+            if (playPromise) {
+                playPromise
+                    .then(() => {
+                        this.isPrintingSoundActive = true;
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        (this as any)._customPrintAudio = customAudio;
+                    })
+                    .catch(() => {
+                        fallback();
+                    });
+            } else {
+                fallback();
+            }
+        };
+
+        tryPlayFile('/sounds/paper-friction.mp3', () => {
+            tryPlayFile('/sounds/printer-working.mp3', () => {
+                // Nếu chưa có file mp3 thì dùng bộ tổng hợp âm thanh Web Audio API mô phỏng tiếng ngòi bút ma sát trên thớ giấy
+                this.startSynthesizedPrintSound(isGold);
+            });
+        });
     }
 
     /**
-     * Tổng hợp tiếng motor bước + dither nhiệt máy in nhẹ nhàng bằng Web Audio API
+     * Tổng hợp tiếng bút cọ trên bề mặt giấy (Paper Friction / Sketching ASMR) bằng Web Audio API
+     * Không còn tiếng cơ khí motor bước, mà là tiếng ma sát ngòi bút sột soạt tự nhiên và êm dịu trên thớ giấy.
      */
     private startSynthesizedPrintSound(isGold: boolean): void {
         try {
@@ -98,65 +109,95 @@ class SoundManager {
             const now = ctx.currentTime;
             const mainGain = ctx.createGain();
             mainGain.gain.setValueAtTime(0, now);
-            mainGain.gain.linearRampToValueAtTime((isGold ? 0.22 : 0.16) * this.sfxVolume, now + 0.1);
+            mainGain.gain.linearRampToValueAtTime((isGold ? 0.22 : 0.16) * this.sfxVolume, now + 0.12);
             mainGain.connect(ctx.destination);
             this.printGainNode = mainGain;
 
-            // Bộ lọc dải thông tần thấp tạo tiếng cơ khí êm dịu, không chói tai
-            const filter = ctx.createBiquadFilter();
-            filter.type = 'lowpass';
-            filter.frequency.setValueAtTime(420, now);
-            filter.Q.setValueAtTime(3.0, now);
-            filter.connect(mainGain);
+            // 1. Tạo buffer tiếng vi hạt thớ giấy (Pink noise có micro-texture ngẫu nhiên)
+            const sampleRate = ctx.sampleRate;
+            const bufferLen = sampleRate * 3; // 3 giây seamless loop
+            const noiseBuffer = ctx.createBuffer(1, bufferLen, sampleRate);
+            const data = noiseBuffer.getChannelData(0);
 
-            // Dao động 1: Tiếng motor bước tần số 110Hz (nhịp cơ khí)
-            const osc1 = ctx.createOscillator();
-            osc1.type = 'sawtooth';
-            osc1.frequency.setValueAtTime(110, now);
-            osc1.connect(filter);
-            osc1.start(now);
-            this.printMotorOsc1 = osc1;
+            let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+            for (let i = 0; i < bufferLen; i++) {
+                const white = Math.random() * 2 - 1;
+                // Pink noise filter (Paul Kellet algorithm)
+                b0 = 0.99886 * b0 + white * 0.0555179;
+                b1 = 0.99332 * b1 + white * 0.0750759;
+                b2 = 0.96900 * b2 + white * 0.1538520;
+                b3 = 0.86650 * b3 + white * 0.3104856;
+                b4 = 0.55000 * b4 + white * 0.5329522;
+                b5 = -0.7616 * b5 - white * 0.0168980;
+                const pink = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
+                b6 = white * 0.115926;
 
-            // Dao động 2: Hòa âm thứ hai 220Hz
-            const osc2 = ctx.createOscillator();
-            osc2.type = 'triangle';
-            osc2.frequency.setValueAtTime(220, now);
-            osc2.connect(filter);
-            osc2.start(now);
-            this.printMotorOsc2 = osc2;
-
-            // Tiếng xì xào nhẹ của kim in nhiệt (White noise buffer)
-            const bufferSize = ctx.sampleRate * 2;
-            const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-            const output = noiseBuffer.getChannelData(0);
-            for (let i = 0; i < bufferSize; i++) {
-                output[i] = Math.random() * 2 - 1;
+                // Thêm vi hạt sần sột soạt của giấy thô (micro-grain texture)
+                const grain = Math.random() < 0.025 ? (Math.random() * 0.3 - 0.15) : 0;
+                data[i] = (pink * 0.12 + grain);
             }
 
-            const noise = ctx.createBufferSource();
-            noise.buffer = noiseBuffer;
-            noise.loop = true;
+            const noiseSource = ctx.createBufferSource();
+            noiseSource.buffer = noiseBuffer;
+            noiseSource.loop = true;
 
-            const noiseFilter = ctx.createBiquadFilter();
-            noiseFilter.type = 'bandpass';
-            noiseFilter.frequency.setValueAtTime(1400, now);
-            noiseFilter.Q.setValueAtTime(2.0, now);
+            // 2. Lớp 1: Tiếng cọ xát đầu ngòi bút (Bandpass Filter 2700Hz, Q = 2.4)
+            const frictionFilter = ctx.createBiquadFilter();
+            frictionFilter.type = 'bandpass';
+            frictionFilter.frequency.setValueAtTime(2700, now);
+            frictionFilter.Q.setValueAtTime(2.4, now);
 
-            const noiseGain = ctx.createGain();
-            noiseGain.gain.setValueAtTime(0.04 * this.sfxVolume, now);
+            // 3. Lớp 2: Tiếng rột roạt xì xào thoáng nhẹ của thớ giấy (Highpass 4500Hz)
+            const whisperFilter = ctx.createBiquadFilter();
+            whisperFilter.type = 'highpass';
+            whisperFilter.frequency.setValueAtTime(4500, now);
+            whisperFilter.Q.setValueAtTime(0.7, now);
 
-            noise.connect(noiseFilter);
-            noiseFilter.connect(noiseGain);
-            noiseGain.connect(mainGain);
-            noise.start(now);
-            this.printNoiseNode = noise;
+            // 4. Bộ điều chế nhịp nét vẽ (Stroke Rhythm LFO):
+            // Mô phỏng nhịp bút lia qua lại trên giấy (~7.5 nét vẽ/giây)
+            const strokeLFO = ctx.createOscillator();
+            strokeLFO.type = 'triangle';
+            strokeLFO.frequency.setValueAtTime(7.5, now);
+
+            // Điều chế cường độ âm thanh theo nhịp vẽ (độ sâu ~0.35)
+            const strokeGain = ctx.createGain();
+            strokeGain.gain.setValueAtTime(0.65, now);
+            const lfoAmpGain = ctx.createGain();
+            lfoAmpGain.gain.setValueAtTime(0.35, now);
+            strokeLFO.connect(lfoAmpGain);
+            lfoAmpGain.connect(strokeGain.gain);
+
+            // Điều chế nhẹ tần số cộng hưởng (+/- 300Hz) mô phỏng góc nghiêng bút thay đổi
+            const lfoFreqGain = ctx.createGain();
+            lfoFreqGain.gain.setValueAtTime(300, now);
+            strokeLFO.connect(lfoFreqGain);
+            lfoFreqGain.connect(frictionFilter.frequency);
+
+            // Gain cho lớp xì xào thớ giấy
+            const whisperGain = ctx.createGain();
+            whisperGain.gain.setValueAtTime(0.25, now);
+
+            // Kết nối chuỗi âm thanh
+            noiseSource.connect(frictionFilter);
+            frictionFilter.connect(strokeGain);
+            strokeGain.connect(mainGain);
+
+            noiseSource.connect(whisperFilter);
+            whisperFilter.connect(whisperGain);
+            whisperGain.connect(mainGain);
+
+            strokeLFO.start(now);
+            noiseSource.start(now);
+
+            this.paperNoiseSource = noiseSource;
+            this.paperStrokeLFO = strokeLFO;
         } catch (err) {
-            console.warn('[SoundManager] Lỗi khởi tạo tiếng in:', err);
+            console.warn('[SoundManager] Lỗi khởi tạo tiếng cọ giấy:', err);
         }
     }
 
     /**
-     * Dừng tiếng máy in khi hoàn thành lượt in
+     * Dừng âm thanh cọ giấy khi hoàn thành lượt in / vẽ
      */
     public stopPrintSound(): void {
         this.isPrintingSoundActive = false;
@@ -172,25 +213,22 @@ class SoundManager {
 
         if (this.ctx && this.printGainNode) {
             const now = this.ctx.currentTime;
-            this.printGainNode.gain.linearRampToValueAtTime(0, now + 0.12);
+            this.printGainNode.gain.linearRampToValueAtTime(0, now + 0.1);
 
             setTimeout(() => {
                 try {
-                    this.printMotorOsc1?.stop();
-                    this.printMotorOsc2?.stop();
-                    this.printNoiseNode?.stop();
-                    this.printMotorOsc1?.disconnect();
-                    this.printMotorOsc2?.disconnect();
-                    this.printNoiseNode?.disconnect();
+                    this.paperStrokeLFO?.stop();
+                    this.paperNoiseSource?.stop();
+                    this.paperStrokeLFO?.disconnect();
+                    this.paperNoiseSource?.disconnect();
                     this.printGainNode?.disconnect();
                 } catch {
                     // ignore
                 }
-                this.printMotorOsc1 = null;
-                this.printMotorOsc2 = null;
-                this.printNoiseNode = null;
+                this.paperStrokeLFO = null;
+                this.paperNoiseSource = null;
                 this.printGainNode = null;
-            }, 150);
+            }, 120);
         }
     }
 
