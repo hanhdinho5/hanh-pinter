@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { PrinterCanvas, type PrinterCanvasHandle } from './printer3d/PrinterCanvas';
 import { DevControls } from './components/DevControls';
 import { OverlayView } from './components/OverlayView';
+import { AdminView } from './components/AdminView';
 import { usePrinterSocket } from './socket/usePrinterSocket';
 import { mockPartialSheet } from './printer3d/mockData';
 import type { Sheet, SheetEntry, PrintJob } from './types';
@@ -11,6 +12,10 @@ export function App() {
     const isOverlayRoute =
         window.location.pathname === '/overlay' ||
         window.location.search.includes('overlay=true');
+
+    if (window.location.pathname === '/admin') {
+        return <AdminView />;
+    }
 
     if (isOverlayRoute) {
         return <OverlayView />;

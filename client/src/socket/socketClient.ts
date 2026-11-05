@@ -106,6 +106,20 @@ export const api = {
         });
         return res.json();
     },
+    async getGiftConfig(serverUrl = DEFAULT_SERVER_URL) {
+        const res = await fetch(`${serverUrl}/api/config/gift`);
+        return res.json() as Promise<{ goldDiamonds: number; fullPageDiamonds: number }>;
+    },
+    async setGiftConfig(goldDiamonds: number, fullPageDiamonds: number, serverUrl = DEFAULT_SERVER_URL) {
+        const res = await fetch(`${serverUrl}/api/config/gift`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ goldDiamonds, fullPageDiamonds }),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error ?? 'Lỗi lưu cấu hình');
+        return body as { goldDiamonds: number; fullPageDiamonds: number };
+    },
     async getTikTokStatus(serverUrl = DEFAULT_SERVER_URL) {
         const res = await fetch(`${serverUrl}/api/tiktok/status`);
         return res.json();

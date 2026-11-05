@@ -1,6 +1,8 @@
 import dotenv from 'dotenv';
+import { loadSettings } from './settings.js';
 
 dotenv.config();
+const saved = loadSettings();
 
 const num = (name: string, fallback: number): number => {
     const raw = process.env[name];
@@ -24,12 +26,16 @@ export const config = {
     },
     gift: {
         /** Tổng kim cương (diamondCount * giftCount) để ra khung vàng. */
-        goldDiamonds: num('GOLD_DIAMONDS', 100),
+        goldDiamonds: num('GOLD_DIAMONDS', saved.goldDiamonds ?? 100),
         /** Tổng kim cương để in nguyên một trang. */
-        fullPageDiamonds: num('FULL_PAGE_DIAMONDS', 1000),
+        fullPageDiamonds: num('FULL_PAGE_DIAMONDS', saved.fullPageDiamonds ?? 1000),
+    },
+    queue: {
+        /** Số lượt in miễn phí tối đa đang chờ; vượt thì bỏ comment/follow mới (tránh in trễ hàng chục phút). */
+        maxFree: num('MAX_FREE_QUEUE', 30),
     },
     /** Số job đã hoàn tất giữ lại trong bộ nhớ. */
     historyLimit: 50,
-} as const;
+};
 
 export type AppConfig = typeof config;

@@ -35,11 +35,15 @@ export class SheetCanvasRenderer {
         if (!url || this.imageCache.has(url)) return;
         const img = new Image();
         img.crossOrigin = 'anonymous';
+        // Avatar TikTok đi qua proxy của server (CDN không có CORS)
+        const remote = /^https?:\/\/(?!localhost)/.test(url) && !url.includes('/api/avatar');
+        const serverUrl = (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_SERVER_URL ?? `${window.location.protocol}//${window.location.hostname}:3001`;
+        const src = remote ? `${serverUrl}/api/avatar?url=${encodeURIComponent(url)}` : url;
         img.onload = () => {
             this.imageCache.set(url, img);
             onLoaded?.();
         };
-        img.src = url;
+        img.src = src;
     }
 
     /**

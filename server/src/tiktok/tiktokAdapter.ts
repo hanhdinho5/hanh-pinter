@@ -1,44 +1,12 @@
-import { WebcastPushConnection } from 'tiktok-live-connector/legacy';
+import { TikTokLiveConnection, WebcastEvent, ControlEvent } from 'tiktok-live-connector';
 import type { Bus } from '../events/bus.js';
 import type { EventHandler, NewEventInput } from '../events/eventHandler.js';
+import type { TikTokConnectionStatus, TikTokStatus } from '../types/index.js';
+import { loadSettings, saveSettings } from '../settings.js';
 
-export type TikTokConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+export type { TikTokConnectionStatus, TikTokStatus };
 
-export interface TikTokStatus {
-    status: TikTokConnectionStatus;
-    username: string | null;
-    roomId: string | null;
-    error: string | null;
-    reconnectAttempts: number;
-}
-
-export interface TikTokChatEvent {
-    userId?: string | number;
-    uniqueId?: string;
-    nickname?: string;
-    comment?: string;
-    profilePictureUrl?: string;
-    profilePictureUrls?: string[];
-    userDetails?: {
-        profilePictureUrls?: string[];
-    };
-    user?: {
-        id?: string;
-        uniqueId?: string;
-        nickname?: string;
-        avatarThumb?: { urlList?: string[] };
-        avatarMedium?: { urlList?: string[] };
-    };
-}
-
-export interface TikTokGiftEvent extends TikTokChatEvent {
-    giftId?: number | string;
-    giftName?: string;
-    repeatCount?: number;
-    diamondCount?: number;
-    giftType?: number;
-    repeatEnd?: boolean | number;
-}
+type Loose = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 export const extractAvatarUrl = (data: unknown): string | null => {
     if (!data || typeof data !== 'object') return null;
@@ -57,6 +25,8 @@ export const extractAvatarUrl = (data: unknown): string | null => {
     }
 
     const user = d['user'] as Record<string, unknown> | undefined;
+    const pic = user?.['profilePicture'] as Record<string, unknown> | undefined;
+    if (Array.isArray(pic?.['urls']) && pic['urls'].length > 0) return String(pic['urls'][0]);
     const thumb = user?.['avatarThumb'] as Record<string, unknown> | undefined;
     if (Array.isArray(thumb?.['urlList']) && thumb['urlList'].length > 0) {
         return String(thumb['urlList'][0]);
@@ -75,8 +45,9 @@ export const extractUser = (data: unknown): { userId: string; username: string }
     const d = data as Record<string, unknown>;
     const user = d['user'] as Record<string, unknown> | undefined;
 
-    const rawId = d['userId'] ?? user?.['id'] ?? d['uniqueId'] ?? 'anonymous';
-    const rawName = d['uniqueId'] ?? d['nickname'] ?? user?.['uniqueId'] ?? user?.['nickname'] ?? 'Viewer';
+    const rawId = d['userId'] ?? user?.['userId'] ?? user?.['id'] ?? user?.['uniqueId'] ?? d['uniqueId'] ?? 'anonymous';
+    const rawName =
+        user?.['uniqueId'] ?? user?.['displayId'] ?? d['uniqueId'] ?? user?.['nickname'] ?? d['nickname'] ?? 'Viewer';
 
     return {
         userId: String(rawId),
@@ -84,8 +55,18 @@ export const extractUser = (data: unknown): { userId: string; username: string }
     };
 };
 
+export const extractGift = (data: Loose): { giftId: string; giftName: string; diamondCount: number; streakable: boolean } => ({
+    giftId: String(data?.giftId ?? data?.gift?.id ?? 'gift'),
+    giftName: String(data?.giftName ?? data?.giftDetails?.giftName ?? data?.gift?.name ?? 'TikTok Gift'),
+    diamondCount: Math.max(
+        1,
+        Number(data?.diamondCount ?? data?.giftDetails?.diamondCount ?? data?.gift?.diamondCount ?? 1) || 1,
+    ),
+    streakable: (data?.giftType ?? data?.giftDetails?.giftType ?? data?.gift?.type) === 1,
+});
+
 export class TikTokAdapter {
-    private connection: WebcastPushConnection | null = null;
+    private connection: TikTokLiveConnection | null = null;
     private currentUsername: string | null = null;
     private roomId: string | null = null;
     private status: TikTokConnectionStatus = 'disconnected';
@@ -93,11 +74,10 @@ export class TikTokAdapter {
     private reconnectAttempts = 0;
     private reconnectTimeout: NodeJS.Timeout | null = null;
     private shouldReconnect = false;
-    private readonly maxReconnectAttempts = 10;
 
     constructor(
         private readonly handler: EventHandler,
-        private readonly bus?: Bus
+        private readonly bus?: Bus,
     ) {}
 
     public getStatus(): TikTokStatus {
@@ -110,217 +90,215 @@ export class TikTokAdapter {
         };
     }
 
+    /** Khởi động server: tự nối lại tài khoản đã lưu lần trước. */
+    public autoConnectFromSettings(): void {
+        const user = loadSettings().tiktokUser;
+        if (user) {
+            console.log(`[TikTok] Tự kết nối lại @${user} (đã lưu từ lần trước)`);
+            void this.connect(user);
+        }
+    }
+
     public async connect(username: string): Promise<{ success: boolean; message?: string }> {
         const cleanUsername = username.replace(/^@/, '').trim();
-        if (!cleanUsername) {
-            return { success: false, message: 'Tên người dùng TikTok không hợp lệ' };
-        }
+        if (!cleanUsername) return { success: false, message: 'Tên người dùng TikTok không hợp lệ' };
 
-        // Nếu đã kết nối với tài khoản này rồi
         if (this.connection && this.currentUsername === cleanUsername && this.status === 'connected') {
             return { success: true, message: 'Đã kết nối với phiên live này' };
         }
 
-        // Ngắt kết nối phiên cũ nếu có
-        await this.disconnect();
-
+        await this.teardown();
         this.currentUsername = cleanUsername;
-        this.status = 'connecting';
         this.shouldReconnect = true;
         this.lastError = null;
         this.reconnectAttempts = 0;
-        this.emitStatus();
-
+        saveSettings({ tiktokUser: cleanUsername });
+        this.setStatus('connecting');
         return this.initiateConnection();
     }
 
+    /** Chủ động ngắt: không tự nối lại, lần bật server sau cũng không tự nối. */
     public async disconnect(): Promise<void> {
+        await this.teardown();
+        saveSettings({ tiktokUser: '' });
+        this.setStatus('disconnected');
+    }
+
+    private async teardown(): Promise<void> {
         this.shouldReconnect = false;
-        if (this.reconnectTimeout) {
-            clearTimeout(this.reconnectTimeout);
-            this.reconnectTimeout = null;
-        }
-
-        if (this.connection) {
-            try {
-                this.connection.disconnect();
-            } catch (err) {
-                console.error('Lỗi khi ngắt kết nối TikTok:', err);
-            }
-            this.connection = null;
-        }
-
-        this.status = 'disconnected';
+        if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
+        this.reconnectTimeout = null;
+        this.dropConnection();
         this.roomId = null;
-        this.emitStatus();
+    }
+
+    private dropConnection(): void {
+        const conn = this.connection;
+        this.connection = null; // đặt trước để listener của kết nối cũ biết mình đã "lỗi thời"
+        if (conn) {
+            try {
+                conn.disconnect();
+            } catch (err) {
+                console.error('[TikTok] Lỗi khi ngắt kết nối cũ:', err);
+            }
+        }
     }
 
     private async initiateConnection(): Promise<{ success: boolean; message?: string }> {
-        if (!this.currentUsername) {
-            this.status = 'disconnected';
-            return { success: false, message: 'Chưa có username TikTok' };
-        }
+        const username = this.currentUsername;
+        if (!username) return { success: false, message: 'Chưa có username TikTok' };
+
+        this.dropConnection();
+        const conn = new TikTokLiveConnection(username, {
+            processInitialData: false,
+            enableExtendedGiftInfo: false, // cần gói trả phí; sự kiện quà đã có tên và kim cương
+        });
+        this.connection = conn;
+        this.setupEventListeners(conn);
 
         try {
-            const conn = new WebcastPushConnection(this.currentUsername, {
-                processInitialData: false,
-                enableExtendedGiftInfo: true,
-            });
-            this.connection = conn;
+            const live = await conn.fetchIsLive().catch(() => true); // hỏi lỗi thì cứ thử kết nối
+            if (!live) throw new Error('Tài khoản này CHƯA LIVE. Hãy bấm Phát trực tiếp trước rồi kết nối');
+            const state = await Promise.race([
+                conn.connect(),
+                new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Quá 30 giây không vào được phòng live')), 30_000)),
+            ]);
+            if (this.connection !== conn) return { success: false, message: 'Đã bị thay bằng kết nối khác' };
 
-            this.setupEventListeners(conn);
-
-            const state = await conn.connect();
-            this.status = 'connected';
             this.roomId = state?.roomId ? String(state.roomId) : null;
             this.reconnectAttempts = 0;
             this.lastError = null;
-            this.emitStatus();
-
-            console.log(`[TikTok Adapter] Đã kết nối thành công phòng LIVE của @${this.currentUsername} (RoomId: ${this.roomId})`);
-            return { success: true, message: `Đã kết nối phòng LIVE @${this.currentUsername}` };
+            this.setStatus('connected');
+            console.log(`[TikTok] Đã kết nối @${username} (room ${this.roomId})`);
+            return { success: true, message: `Đã kết nối phòng LIVE @${username}` };
         } catch (error) {
-            const errMsg = error instanceof Error ? error.message : String(error);
-            console.error(`[TikTok Adapter] Lỗi kết nối LIVE @${this.currentUsername}:`, errMsg);
-            this.lastError = errMsg;
-
-            if (this.shouldReconnect) {
-                this.scheduleReconnect();
-            } else {
-                this.status = 'disconnected';
-                this.emitStatus();
-            }
-
-            return { success: false, message: errMsg };
+            const msg = error instanceof Error ? error.message : String(error);
+            console.error(`[TikTok] Lỗi kết nối @${username}:`, msg);
+            if (this.connection !== conn) return { success: false, message: msg };
+            this.lastError = msg;
+            this.dropConnection();
+            this.scheduleReconnect();
+            return { success: false, message: msg };
         }
     }
 
-    private setupEventListeners(conn: WebcastPushConnection): void {
-        // 1. Sự kiện bình luận (Comment / Chat)
-        conn.on('chat', (data: TikTokChatEvent) => {
+    private setupEventListeners(connection: TikTokLiveConnection): void {
+        // typings của thư viện không tương thích TS 7: dùng giao diện tối thiểu
+        const conn = connection as unknown as { on(event: string, listener: (data: Loose) => void): unknown };
+        const current = () => this.connection === connection;
+        const safe = (name: string, fn: (data: Loose) => void) => (data: Loose) => {
+            if (!current()) return;
             try {
-                const { userId, username } = extractUser(data);
-                const avatarUrl = extractAvatarUrl(data);
-
-                const input: NewEventInput = {
-                    type: 'COMMENT',
-                    userId,
-                    username,
-                    avatarUrl,
-                };
-                this.handler.handle(input);
+                fn(data);
             } catch (err) {
-                console.error('[TikTok Adapter] Lỗi xử lý sự kiện chat:', err);
+                console.error(`[TikTok] Lỗi xử lý sự kiện ${name}:`, err);
             }
+        };
+
+        conn.on(WebcastEvent.CHAT, safe('chat', (d) => this.onChat(d)));
+        conn.on(WebcastEvent.FOLLOW, safe('follow', (d) => this.onFollow(d)));
+        conn.on(WebcastEvent.GIFT, safe('gift', (d) => this.onGift(d)));
+
+        conn.on(ControlEvent.DISCONNECTED, () => {
+            if (!current()) return;
+            console.warn(`[TikTok] Mất kết nối @${this.currentUsername}`);
+            this.dropConnection();
+            this.scheduleReconnect();
         });
 
-        // 2. Sự kiện theo dõi (Follow)
-        conn.on('follow', (data: TikTokChatEvent) => {
-            try {
-                const { userId, username } = extractUser(data);
-                const avatarUrl = extractAvatarUrl(data);
-
-                const input: NewEventInput = {
-                    type: 'FOLLOW',
-                    userId,
-                    username,
-                    avatarUrl,
-                };
-                this.handler.handle(input);
-            } catch (err) {
-                console.error('[TikTok Adapter] Lỗi xử lý sự kiện follow:', err);
-            }
+        conn.on(WebcastEvent.STREAM_END, () => {
+            if (!current()) return;
+            console.log(`[TikTok] Livestream @${this.currentUsername} đã kết thúc`);
+            this.lastError = 'Phiên live đã kết thúc';
+            this.dropConnection();
+            this.scheduleReconnect();
         });
 
-        // 3. Sự kiện tặng quà (Gift)
-        conn.on('gift', (data: TikTokGiftEvent) => {
-            try {
-                // Với combo quà liên hoàn (streak gift), chỉ xử lý khi chuỗi combo kết thúc để in một vé tổng
-                if (data.giftType === 1 && !data.repeatEnd) {
-                    return;
-                }
-
-                const { userId, username } = extractUser(data);
-                const avatarUrl = extractAvatarUrl(data);
-
-                const giftCount = Math.max(1, Number(data.repeatCount ?? 1));
-                const diamondCount = Math.max(1, Number(data.diamondCount ?? 1));
-
-                const input: NewEventInput = {
-                    type: 'GIFT',
-                    userId,
-                    username,
-                    avatarUrl,
-                    giftId: data.giftId ? String(data.giftId) : 'gift',
-                    giftName: data.giftName ? String(data.giftName) : 'TikTok Gift',
-                    giftCount,
-                    diamondCount,
-                };
-                this.handler.handle(input);
-            } catch (err) {
-                console.error('[TikTok Adapter] Lỗi xử lý sự kiện gift:', err);
-            }
-        });
-
-        // 4. Mất kết nối
-        conn.on('disconnected', () => {
-            console.warn(`[TikTok Adapter] Phiên LIVE của @${this.currentUsername} đã bị ngắt kết nối.`);
-            if (this.shouldReconnect) {
-                this.scheduleReconnect();
-            } else {
-                this.status = 'disconnected';
-                this.emitStatus();
-            }
-        });
-
-        // 5. Kết thúc phiên LIVE
-        conn.on('streamEnd', () => {
-            console.log(`[TikTok Adapter] Livestream của @${this.currentUsername} đã kết thúc.`);
-            this.status = 'disconnected';
-            this.shouldReconnect = false;
-            this.emitStatus();
-        });
-
-        // 6. Lỗi kết nối
-        conn.on('error', (err: unknown) => {
-            const message = err instanceof Error ? err.message : String(err);
-            console.error('[TikTok Adapter] Lỗi socket kết nối:', message);
-            this.lastError = message;
-
-            if (this.shouldReconnect && this.status !== 'reconnecting') {
-                this.scheduleReconnect();
-            }
+        conn.on(ControlEvent.ERROR, (err: unknown) => {
+            if (!current()) return;
+            const e = err as { message?: string; info?: string; exception?: { message?: string } } | null;
+            this.lastError = e?.message ?? e?.info ?? e?.exception?.message ?? 'Lỗi không rõ';
+            console.error('[TikTok] Lỗi kết nối:', this.lastError);
+            this.emitStatus(); // chỉ báo lỗi; đã rớt thì sự kiện DISCONNECTED lo việc nối lại
         });
     }
 
-    private scheduleReconnect(): void {
-        if (!this.shouldReconnect || this.reconnectAttempts >= this.maxReconnectAttempts) {
-            console.warn(`[TikTok Adapter] Dừng tự động kết nối lại sau ${this.reconnectAttempts} lần thử.`);
-            this.status = 'disconnected';
-            this.emitStatus();
+    private readonly streaks = new Map<string, { data: Loose; total: number; timer: NodeJS.Timeout }>();
+
+    private onChat(data: Loose): void {
+        this.handler.handle({ type: 'COMMENT', ...extractUser(data), avatarUrl: extractAvatarUrl(data) });
+    }
+
+    private onFollow(data: Loose): void {
+        this.handler.handle({ type: 'FOLLOW', ...extractUser(data), avatarUrl: extractAvatarUrl(data) });
+    }
+
+    /** Combo: TikTok gửi lại cùng quà với repeatCount cộng dồn -> gộp thành MỘT vé với tổng, in khi combo kết thúc. */
+    private onGift(data: Loose): void {
+        const gift = extractGift(data);
+        const total = Math.max(1, Number(data?.repeatCount ?? 1) || 1);
+        if (!gift.streakable) {
+            this.emitGift(data, total);
             return;
         }
-
-        this.reconnectAttempts++;
-        this.status = 'reconnecting';
-        this.emitStatus();
-
-        // Thời gian chờ tăng dần theo cấp số nhân (3s, 6s, 12s, max 30s)
-        const delayMs = Math.min(30000, 3000 * Math.pow(1.5, this.reconnectAttempts - 1));
-        console.log(`[TikTok Adapter] Sẽ thử kết nối lại sau ${Math.round(delayMs / 1000)}s (lần ${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
-
-        if (this.reconnectTimeout) {
-            clearTimeout(this.reconnectTimeout);
+        const key = `${extractUser(data).userId}_${gift.giftId}`;
+        const prev = this.streaks.get(key);
+        if (prev) clearTimeout(prev.timer);
+        if (data?.repeatEnd) {
+            this.streaks.delete(key);
+            this.emitGift(data, total);
+            return;
         }
+        // phòng khi TikTok không gửi tín hiệu kết thúc: im 4s thì tự in
+        const timer = setTimeout(() => {
+            const cur = this.streaks.get(key);
+            this.streaks.delete(key);
+            if (cur) this.emitGift(cur.data, cur.total);
+        }, 4000);
+        timer.unref();
+        this.streaks.set(key, { data, total: Math.max(total, prev?.total ?? 0), timer });
+    }
 
+    private emitGift(data: Loose, giftCount: number): void {
+        const gift = extractGift(data);
+        const input: NewEventInput = {
+            type: 'GIFT',
+            ...extractUser(data),
+            avatarUrl: extractAvatarUrl(data),
+            giftId: gift.giftId,
+            giftName: gift.giftName,
+            giftCount,
+            diamondCount: gift.diamondCount,
+        };
+        this.handler.handle(input);
+    }
+
+    /** Dùng để thử khi chưa live: đưa dữ liệu thô (đúng dạng TikTok) vào đúng đường xử lý thật. */
+    public simulate(kind: 'chat' | 'follow' | 'gift', data: Loose): void {
+        if (kind === 'chat') this.onChat(data);
+        else if (kind === 'follow') this.onFollow(data);
+        else this.onGift(data);
+    }
+
+    /** Nối lại vô hạn khi còn muốn giữ kết nối (treo live cả ngày): 5s, 10s, 20s, 40s, tối đa 60s. */
+    private scheduleReconnect(): void {
+        if (!this.shouldReconnect || this.reconnectTimeout) return;
+        const delayMs = Math.min(60_000, 5_000 * 2 ** this.reconnectAttempts);
+        this.reconnectAttempts++;
+        console.log(`[TikTok] Thử kết nối lại sau ${Math.round(delayMs / 1000)}s (lần ${this.reconnectAttempts})`);
+        this.setStatus('reconnecting');
         this.reconnectTimeout = setTimeout(() => {
-            void this.initiateConnection();
+            this.reconnectTimeout = null;
+            if (this.shouldReconnect) void this.initiateConnection();
         }, delayMs);
     }
 
+    private setStatus(status: TikTokConnectionStatus): void {
+        this.status = status;
+        this.emitStatus();
+    }
+
     private emitStatus(): void {
-        const payload = this.getStatus();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (this.bus as any)?.emit('tiktok:status', payload);
+        this.bus?.emit('tiktok:status', this.getStatus());
     }
 }

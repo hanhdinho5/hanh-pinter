@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { extractUser, extractAvatarUrl } from './tiktokAdapter.js';
+import { extractUser, extractAvatarUrl, extractGift } from './tiktokAdapter.js';
 
 test('extractUser trích xuất chính xác userId và username từ các cấu trúc dữ liệu TikTok', () => {
     // Trường hợp 1: Dữ liệu phẳng
@@ -50,3 +50,16 @@ test('extractAvatarUrl trích xuất avatar theo độ ưu tiên', () => {
     assert.equal(a5, null);
 });
 
+
+test('proto v3: user lồng + quà combo chỉ tính phần mới', () => {
+    const data = {
+        user: { userId: '42', uniqueId: 'viewer_a', avatarThumb: { urlList: ['https://cdn/a.jpg'] } },
+        giftId: 5655,
+        giftDetails: { giftName: 'Rose', diamondCount: 1, giftType: 1 },
+    };
+    assert.deepEqual(extractUser(data), { userId: '42', username: 'viewer_a' });
+    assert.equal(extractAvatarUrl(data), 'https://cdn/a.jpg');
+    const g = extractGift(data);
+    assert.equal(g.giftName, 'Rose');
+    assert.equal(g.streakable, true);
+});

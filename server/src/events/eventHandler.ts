@@ -11,7 +11,7 @@ export type NewEventInput = Pick<ViewerEvent, 'type' | 'userId' | 'username'> &
 
 export type HandleResult =
     | { accepted: true; job: PrintJob; event: ViewerEvent }
-    | { accepted: false; reason: 'duplicate'; event: ViewerEvent };
+    | { accepted: false; reason: 'duplicate' | 'queue_full'; event: ViewerEvent };
 
 interface Classification {
     lane: JobLane;
@@ -49,6 +49,7 @@ export class EventHandler {
         private readonly engine: PrinterEngine,
         private readonly bus: Bus,
         private readonly giftConfig: AppConfig['gift'],
+        private readonly maxFreeQueue: number = Infinity,
     ) {}
 
     handle(input: NewEventInput): HandleResult {
@@ -60,6 +61,9 @@ export class EventHandler {
         // Chỉ lượt in miễn phí mới bị giới hạn 1 lần/tờ; gift luôn được in.
         if (rule.lane === 'free' && (this.sheets.hasUser(event.userId) || this.queue.hasFreeJobFor(event.userId))) {
             return { accepted: false, reason: 'duplicate', event };
+        }
+        if (rule.lane === 'free' && this.queue.freeSize >= this.maxFreeQueue) {
+            return { accepted: false, reason: 'queue_full', event };
         }
 
         const job: PrintJob = {

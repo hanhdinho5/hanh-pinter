@@ -81,7 +81,7 @@ test('pause/resume: job đang in xong rồi dừng, resume thì chạy tiếp', 
 });
 
 test('không mất job khi nhận nhiều event liên tục', async () => {
-    const { handler, engine, sheets } = createCore(fast);
+    const { handler, engine, sheets } = createCore({ ...fast, queue: { maxFree: 1000 } });
     for (let i = 0; i < 50; i++) handler.handle(comment(`m${i}`));
     await engine.idle();
     assert.equal(sheets.completedCount * 6 + sheets.current.entries.length, 50);

@@ -47,6 +47,10 @@ export class PrintQueue {
         );
     }
 
+    get freeSize(): number {
+        return this.free.length;
+    }
+
     get size(): number {
         return this.priority.length + this.free.length;
     }

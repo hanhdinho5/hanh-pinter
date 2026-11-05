@@ -94,50 +94,18 @@ Phần lõi chạy hoàn chỉnh, không phụ thuộc TikTok.
 ---
 
 ### Giai đoạn 5: TikTok LIVE Adapter - [HOÀN TẤT]
-- Tích hợp `tiktok-live-connector`: [tiktokAdapter.ts](file:///d:/Projects/ptp-printer/server/src/tiktok/tiktokAdapter.ts).
-- Adapter độc lập, không can thiệp logic nội bộ của máy in:
-  - Lắng nghe các sự kiện `chat`, `follow`, `gift` từ livestream TikTok.
-  - Chuẩn hoá thông tin người dùng: trích xuất chính xác avatar (theo thứ tự ưu tiên các trường CDN của TikTok), `userId`, `username`.
-  - Với combo quà (streak gifts): chỉ gửi job khi chuỗi combo kết thúc để gom thành một vé in hoàn chỉnh với tổng số kim cương.
-  - Chuyển đổi dữ liệu sang `NewEventInput` rồi gọi `handler.handle()`.
-- Xử lý mất kết nối & tự động kết nối lại (Auto Reconnect):
-  - Cơ chế Exponential Backoff (chờ 3s, 6s, 12s, tối đa 30s) lên tới 10 lần thử.
-  - Trạng thái rõ ràng: `disconnected`, `connecting`, `connected`, `reconnecting`.
-- REST API & Realtime Socket:
-  - `POST /api/tiktok/connect`: Kết nối phòng livestream theo username.
-  - `POST /api/tiktok/disconnect`: Chủ động ngắt kết nối và huỷ tiến trình reconnect.
-  - `GET /api/tiktok/status`: Lấy trạng thái kết nối hiện tại.
-  - Sự kiện Socket.IO `tiktok:status` đồng bộ trực tiếp lên giao diện Dashboard.
-- Unit Test: 7/7 test đạt (thêm test trích xuất avatar và user ID).
+- `server/src/tiktok/tiktokAdapter.ts` dùng API mới của `tiktok-live-connector` 2.x (`TikTokLiveConnection`, proto v3), không dùng bản `legacy`.
+- Chuyển chat/follow/gift sang `NewEventInput` rồi gọi `handler.handle()`, không đụng engine.
+- Quà combo: gộp cả combo thành MỘT vé với tổng kim cương, in khi combo kết thúc (hoặc sau 4s im lặng). Kiểm tra `fetchIsLive()` trước khi vào phòng.
+- Tự nối lại vô hạn khi rớt/hết phiên: 5s, 10s, 20s, 40s, tối đa 60s. Listener của kết nối cũ bị bỏ qua, chỉ một timer nối lại.
+- Server nhớ username (`server/data/settings.json`, đã gitignore) và tự nối lại khi bật lại; bấm Ngắt thì quên.
+- REST: `POST /api/tiktok/connect|disconnect`, `GET /api/tiktok/status`; Socket.IO `tiktok:status`.
+- Avatar TikTok đi qua proxy `GET /api/avatar?url=` (chỉ cho CDN TikTok) vì CDN không có CORS cho canvas WebGL.
+- `pnpm test`: 11/11 (gồm test luồng adapter: combo, trùng, hàng đợi đầy).
 
----
-
-### Giai đoạn 6: Dashboard & OBS (Hoàn thiện bảng điều khiển streamer, cấu hình quà tặng, chạy thử nghiệm livestream thật) - [TIẾP THEO]
-- Đầu in di chuyển theo trục X/Y trên vị trí ô đang in.
-- Avatar hiện dần theo từng dòng (quét in từ trên xuống dưới / dither print effect).
-- Giấy cuộn/đẩy ra từ khe máy in khi đủ 6 ảnh (hoặc khi đẩy tờ dở).
-- Hiệu ứng hạt hào quang kim loại / khung vàng sáng khi in quà tặng lớn (≥ 100 kim cương).
-- Hiệu ứng trang đặc biệt (≥ 1000 kim cương).
-
----
-
-### Giai đoạn 4: Realtime (Socket.IO Client & Overlay OBS) - [CHƯA LÀM]
-- Kết nối Socket.IO từ React client đến backend server (`:3001`).
-- Dùng chung kiểu dữ liệu từ `RealtimeEventMap`.
-- Trang overlay `/overlay` tỷ lệ cố định 9:16 (1080×1920), nền trong suốt hoặc workshop phù hợp OBS Browser Source.
-- Đồng bộ mượt mà sự kiện in thật từ queue backend.
-
----
-
-### Giai đoạn 5: TikTok LIVE Adapter - [CHƯA LÀM]
-- Tích hợp `tiktok-live-connector`.
-- Adapter chuyển sự kiện livestream (chat, follow, gift) thành `NewEventInput` và chuyển cho `EventHandler`.
-- Cơ chế reconnect tự động, xử lý khi streamer ngắt kết nối.
-- Lấy đúng avatar và thông tin người xem.
-
----
-
-### Giai đoạn 6: Dashboard Điều khiển & Tối ưu OBS - [CHƯA LÀM]
-- Trang Dashboard `/admin`: Điều khiển pause / resume / tốc độ in.
-- Cấu hình ngưỡng quà, nhập TikTok username để kết nối livestream trực tiếp.
-- Chạy thử nghiệm thực tế với livestream TikTok.
+### Giai đoạn 6: Dashboard & OBS - [HOÀN TẤT PHẦN CODE, CHƯA CHẠY LIVE THẬT]
+- Trang `/admin`: trạng thái + nhập username TikTok, pause/resume/tốc độ, ngưỡng quà, link OBS, nút thử, sự kiện gần đây.
+- `GET/PUT /api/config/gift`: đổi ngưỡng khung vàng / nguyên trang ngay lập tức và lưu file.
+- Thử khi chưa live: `/admin` có nút "Giả lập TikTok" (POST `/api/dev/tiktok/simulate`) đi qua đúng adapter thật, gồm combo quà.
+- OBS: Browser Source `http://localhost:5173/overlay`, 1080x1920.
+- Còn lại: chạy thử trên livestream TikTok thật (reconnect, avatar, quà combo chưa kiểm chứng ngoài đời).
