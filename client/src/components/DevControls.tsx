@@ -553,6 +553,20 @@ export function DevControls({
                     >
                         {bgmPlaying ? '⏸ Tạm dừng BGM' : '▶ Bật Nhạc BGM'}
                     </button>
+                    <button
+                        onClick={() => {
+                            soundManager.nextTrack();
+                            setBgmPlaying(true);
+                        }}
+                        style={{
+                            ...actionBtnStyle('#475569', '#334155'),
+                            padding: '4px 10px',
+                            fontSize: '11px',
+                        }}
+                        title="Chuyển sang bài nhạc lofi tiếp theo"
+                    >
+                        ⏭️ Bài Kế
+                    </button>
                 </div>
 
                 {/* Thanh trượt âm lượng */}

@@ -207,6 +207,16 @@ export function AdminView() {
                         >
                             {bgmPlaying ? '⏸ Tạm dừng BGM' : '▶ Bật Nhạc BGM'}
                         </button>
+                        <button
+                            style={btn('#475569')}
+                            title="Chuyển sang bài nhạc tiếp theo"
+                            onClick={() => {
+                                soundManager.nextTrack();
+                                setBgmPlaying(true);
+                            }}
+                        >
+                            ⏭️ Bài kế
+                        </button>
                     </div>
                     <label style={{ fontSize: 13 }}>
                         Âm lượng BGM: <b>{bgmVol}%</b>
