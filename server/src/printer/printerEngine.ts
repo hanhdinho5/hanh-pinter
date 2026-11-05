@@ -83,7 +83,8 @@ export class PrinterEngine {
 
     private async process(job: PrintJob): Promise<void> {
         this.currentJob = job;
-        job.slot = job.kind === 'fullPage' ? 0 : this.sheets.nextSlot;
+        const isWide = job.frame === 'gold';
+        job.slot = job.kind === 'fullPage' ? 0 : this.sheets.getNextSlot(isWide);
         job.sheetId = job.kind === 'fullPage' ? null : this.sheets.current.id;
         this.bus.emit('printer:job:started', job);
         this.emitState();
@@ -110,6 +111,7 @@ export class PrinterEngine {
             username: job.username,
             avatarUrl: job.avatarUrl,
             frame: job.frame,
+            isWide: job.frame === 'gold',
         };
 
         if (job.kind === 'fullPage') {

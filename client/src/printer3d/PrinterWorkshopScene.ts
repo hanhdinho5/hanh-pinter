@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { createBrushedMetalTexture } from './textures';
 import { createActionBadgesBar } from './workshopProps';
 import { SheetCanvasRenderer } from './sheetRenderer';
 import { SparkleParticleSystem } from './particles';
@@ -155,117 +154,111 @@ export class PrinterWorkshopScene {
     }
 
     private createPlotterPrinter() {
-        const railLength = 4.2;
-        const railGeo = new THREE.CylinderGeometry(0.022, 0.022, railLength, 16);
-        const railMat = new THREE.MeshStandardMaterial({
-            color: 0xd8e0e8,
-            metalness: 0.95,
-            roughness: 0.15,
+        // CÂY BÚT VẼ (PEN / STYLUS) TINH TẾ THAY THẾ CHO THANH IN CỒNG KỀNH
+        // Thiết kế thanh thoát, không che khuất tờ giấy và phong cảnh thiên nhiên phía sau
+        const penGroup = new THREE.Group();
+        penGroup.position.set(0, 0.08, 0);
+
+        // Góc nghiêng tự nhiên của cây bút (~20 độ) như đang cầm nắn nót viết vẽ trên trang giấy
+        const penAngleGroup = new THREE.Group();
+        penAngleGroup.rotation.z = -0.24;
+        penAngleGroup.rotation.x = -0.14;
+        penGroup.add(penAngleGroup);
+
+        // Vật liệu thân bút: đen bóng sơn mài piano (Midnight Obsidian Lacquer)
+        const penBodyMat = new THREE.MeshStandardMaterial({
+            color: 0x11161d,
+            metalness: 0.88,
+            roughness: 0.16,
         });
 
-        const leftRail = new THREE.Mesh(railGeo, railMat);
-        leftRail.rotation.x = Math.PI / 2;
-        leftRail.position.set(-1.16, 0.18, 0.9);
-        leftRail.castShadow = true;
-        this.scene.add(leftRail);
+        // Vật liệu mạ vàng hoàng gia bóng bẩy (Polished Gold Accents)
+        const goldAccentMat = new THREE.MeshStandardMaterial({
+            color: 0xf59e0b,
+            metalness: 0.96,
+            roughness: 0.12,
+        });
 
-        const rightRail = new THREE.Mesh(railGeo, railMat);
-        rightRail.rotation.x = Math.PI / 2;
-        rightRail.position.set(1.16, 0.18, 0.9);
-        rightRail.castShadow = true;
-        this.scene.add(rightRail);
+        // Vật liệu chrome sáng bóng của ngòi bút
+        const chromeMat = new THREE.MeshStandardMaterial({
+            color: 0xe2e8f0,
+            metalness: 0.98,
+            roughness: 0.06,
+        });
 
-        const mountGeo = new THREE.BoxGeometry(0.08, 0.14, 0.08);
-        const mountMat = new THREE.MeshStandardMaterial({ color: 0x1f242c, metalness: 0.85 });
-        for (const rx of [-1.16, 1.16]) {
-            for (const rz of [-1.15, 2.95]) {
-                const mount = new THREE.Mesh(mountGeo, mountMat);
-                mount.position.set(rx, 0.07, rz);
-                this.scene.add(mount);
-            }
-        }
+        // 1. Thân bút chính (Pen Barrel)
+        const barrelGeo = new THREE.CylinderGeometry(0.024, 0.028, 0.44, 24);
+        const barrel = new THREE.Mesh(barrelGeo, penBodyMat);
+        barrel.position.y = 0.32;
+        barrel.castShadow = true;
+        penAngleGroup.add(barrel);
 
+        // 2. Các vành nhẫn vàng trang trí trên thân bút (Gold Accent Bands)
+        const ringGeo1 = new THREE.CylinderGeometry(0.029, 0.029, 0.014, 24);
+        const ring1 = new THREE.Mesh(ringGeo1, goldAccentMat);
+        ring1.position.y = 0.22;
+        penAngleGroup.add(ring1);
+
+        const ringGeo2 = new THREE.CylinderGeometry(0.029, 0.029, 0.008, 24);
+        const ring2 = new THREE.Mesh(ringGeo2, goldAccentMat);
+        ring2.position.y = 0.46;
+        penAngleGroup.add(ring2);
+
+        // 3. Đuôi nắp bút mạ vàng (Cap Finial)
+        const capGeo = new THREE.CylinderGeometry(0.024, 0.027, 0.06, 24);
+        const cap = new THREE.Mesh(capGeo, goldAccentMat);
+        cap.position.y = 0.55;
+        penAngleGroup.add(cap);
+
+        // 4. Kẹp cài áo mạ vàng (Pen Clip)
+        const clipGeo = new THREE.BoxGeometry(0.008, 0.18, 0.014);
+        const clip = new THREE.Mesh(clipGeo, goldAccentMat);
+        clip.position.set(0.028, 0.42, 0);
+        penAngleGroup.add(clip);
+
+        // 5. Khâu cầm bút tiện công thái học (Grip Section)
+        const gripGeo = new THREE.CylinderGeometry(0.018, 0.024, 0.12, 24);
+        const gripMat = new THREE.MeshStandardMaterial({ color: 0x1e242c, roughness: 0.4, metalness: 0.8 });
+        const grip = new THREE.Mesh(gripGeo, gripMat);
+        grip.position.y = 0.16;
+        penAngleGroup.add(grip);
+
+        // 6. Đầu côn vuốt nhọn (Cone Tip)
+        const coneGeo = new THREE.ConeGeometry(0.018, 0.06, 24);
+        coneGeo.rotateX(Math.PI);
+        const cone = new THREE.Mesh(coneGeo, goldAccentMat);
+        cone.position.y = 0.07;
+        penAngleGroup.add(cone);
+
+        // 7. Ngòi bút siêu mảnh (Fine Nib) chạm thẳng mặt giấy
+        const nibGeo = new THREE.ConeGeometry(0.006, 0.035, 16);
+        nibGeo.rotateX(Math.PI);
+        const nib = new THREE.Mesh(nibGeo, chromeMat);
+        nib.position.y = 0.022;
+        penAngleGroup.add(nib);
+
+        // 8. Đốm sáng tinh tế tại ngòi bút (Nib Glow Point)
+        const nibLedGeo = new THREE.SphereGeometry(0.006, 12, 12);
+        const nibLedMat = new THREE.MeshBasicMaterial({ color: 0xfffbeb });
+        const nibLed = new THREE.Mesh(nibLedGeo, nibLedMat);
+        nibLed.position.y = 0.006;
+        penAngleGroup.add(nibLed);
+
+        // Đèn chiếu sáng nhẹ nhàng tập trung tại điểm vẽ của ngòi bút
+        const printHeadLight = new THREE.SpotLight(0xfff6e6, 2.5, 1.4, Math.PI / 6, 0.8, 1.2);
+        printHeadLight.position.set(0, 0.14, 0);
+        printHeadLight.target.position.set(0, 0, 0);
+        penGroup.add(printHeadLight);
+        penGroup.add(printHeadLight.target);
+
+        // Cây bút được gán vào Gantry điều khiển Z dọc tờ giấy
         const gantryGroup = new THREE.Group();
-        gantryGroup.position.set(0, 0.28, -0.65);
-
-        const metalTex = createBrushedMetalTexture(512, 512, '#181b20');
-        const darkChassisMat = new THREE.MeshStandardMaterial({
-            color: 0x22262d,
-            map: metalTex.map,
-            roughnessMap: metalTex.roughnessMap,
-            roughness: 0.35,
-            metalness: 0.9,
-        });
-
-        const barGeo = new THREE.BoxGeometry(2.46, 0.14, 0.18);
-        const barMesh = new THREE.Mesh(barGeo, darkChassisMat);
-        barMesh.castShadow = true;
-        gantryGroup.add(barMesh);
-
-        const bearingGeo = new THREE.CylinderGeometry(0.065, 0.065, 0.22, 16);
-        const bearingMat = new THREE.MeshStandardMaterial({
-            color: 0x3b424d,
-            metalness: 0.9,
-            roughness: 0.2,
-        });
-
-        const leftBearing = new THREE.Mesh(bearingGeo, bearingMat);
-        leftBearing.rotation.x = Math.PI / 2;
-        leftBearing.position.set(-1.16, 0, 0);
-        gantryGroup.add(leftBearing);
-
-        const rightBearing = new THREE.Mesh(bearingGeo, bearingMat);
-        rightBearing.rotation.x = Math.PI / 2;
-        rightBearing.position.set(1.16, 0, 0);
-        gantryGroup.add(rightBearing);
-
-        const capGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.03, 16);
-        const silverMat = new THREE.MeshStandardMaterial({ color: 0xccd6e0, metalness: 0.9 });
-        for (const bx of [-1.24, 1.24]) {
-            const cap = new THREE.Mesh(capGeo, silverMat);
-            cap.rotation.z = Math.PI / 2;
-            cap.position.set(bx, 0, 0);
-            gantryGroup.add(cap);
-        }
-
-        const feederGeo = new THREE.BoxGeometry(2.15, 0.06, 0.2);
-        const feeder = new THREE.Mesh(feederGeo, darkChassisMat);
-        feeder.position.set(0, 0.04, -0.16);
-        gantryGroup.add(feeder);
-
-        const printHead = new THREE.Group();
-        printHead.position.set(0, 0.02, 0.08);
-
-        const headGeo = new THREE.BoxGeometry(0.24, 0.18, 0.2);
-        const headMesh = new THREE.Mesh(headGeo, darkChassisMat);
-        headMesh.castShadow = true;
-        printHead.add(headMesh);
-
-        const finMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.8 });
-        for (let f = -0.05; f <= 0.05; f += 0.03) {
-            const finGeo = new THREE.BoxGeometry(0.25, 0.01, 0.18);
-            const fin = new THREE.Mesh(finGeo, finMat);
-            fin.position.y = f;
-            printHead.add(fin);
-        }
-
-        const headLedGeo = new THREE.SphereGeometry(0.02, 12, 12);
-        const headLedMat = new THREE.MeshBasicMaterial({ color: 0xfff4e0 });
-        const headLed = new THREE.Mesh(headLedGeo, headLedMat);
-        headLed.position.set(0, -0.09, 0.02);
-        printHead.add(headLed);
-
-        const printHeadLight = new THREE.SpotLight(0xfff6e6, 3.5, 2.5, Math.PI / 6, 0.8, 1.5);
-        printHeadLight.position.set(0, -0.08, 0.02);
-        printHeadLight.target.position.set(0, -0.28, 0.02);
-        printHead.add(printHeadLight);
-        printHead.add(printHeadLight.target);
-
-        gantryGroup.add(printHead);
+        gantryGroup.position.set(0, 0, -0.65);
+        gantryGroup.add(penGroup);
 
         return {
             gantry: gantryGroup,
-            printHead,
+            printHead: penGroup,
             printHeadLight,
         };
     }
@@ -416,32 +409,38 @@ export class PrinterWorkshopScene {
     }
 
     /**
-     * Tính toạ độ 3D của ô slot trên mặt bàn để bùng nổ hạt ánh kim
+     * Tính toạ độ 3D của ô slot trên mặt giấy để bùng nổ hạt ánh kim
      */
-    private getSlotWorldPosition(slotIdx: number): THREE.Vector3 {
+    private getSlotWorldPosition(slotIdx: number, isWide = false): THREE.Vector3 {
+        const row = slotIdx < 2 ? 0 : 1;
         const col = slotIdx % 2;
-        const row = Math.floor(slotIdx / 2);
 
-        const x = col === 0 ? -0.488 : 0.488;
-        const rowCentersZ = [-0.054, 0.939, 1.931];
-        const z = rowCentersZ[Math.min(row, 2)];
+        const x = isWide ? 0 : (col === 0 ? -0.48 : 0.48);
+        const paperZ0 = -0.85;
+        const paperLen = 3.4;
+        // Tâm hàng 0: Y = 160 + 630/2 = 475; Tâm hàng 1: Y = 830 + 630/2 = 1145
+        const rowCentersZ = [
+            paperZ0 + (475 / 1536) * paperLen,
+            paperZ0 + (1145 / 1536) * paperLen,
+        ];
+        const z = rowCentersZ[Math.min(row, 1)];
         const y = 0.04;
 
         return new THREE.Vector3(x, y, z);
     }
 
     /**
-     * Tính toán toạ độ mục tiêu chuẩn xác cho Thanh in (Gantry Z) và Đầu in (Printhead X)
-     * tương ứng đúng vị trí hình ảnh và tiến độ quét dòng trên tờ giấy.
+     * Tính toán toạ độ mục tiêu chuẩn xác cho Cây Bút (Z & X)
+     * tương ứng đúng vị trí hình ảnh và tiến độ quét dòng trên khổ 4 avatar.
      */
     private getSlotPrintheadTargets(
         slotIdx: number,
         progress: number,
-        isSpecial: boolean
+        isSpecial: boolean,
+        isWide = false
     ): { gantryZ: number; centerX: number; halfWidth: number } {
         const paperLen = 3.4;
         const paperZ0 = -0.85; // Mép trên của giấy bắt đầu tại Z = -0.85
-        const headZOffset = 0.08; // Nozzle lệch so với tâm thanh dầm
 
         if (isSpecial) {
             const yStart = 160;
@@ -449,33 +448,41 @@ export class PrinterWorkshopScene {
             const y = yStart + progress * (yEnd - yStart);
             const paperZ = paperZ0 + (y / 1536) * paperLen;
             return {
-                gantryZ: paperZ - headZOffset,
+                gantryZ: paperZ,
                 centerX: 0,
                 halfWidth: 0.78,
             };
         }
 
-        const row = Math.floor(slotIdx / 2);
+        const row = slotIdx < 2 ? 0 : 1;
         const col = slotIdx % 2;
 
-        const rowYStarts = [150, 598.67, 1047.33];
-        const rowHeight = 418.67;
+        // Bố cục 2 hàng: Hàng 0 bắt đầu Y = 160; Hàng 1 bắt đầu Y = 830; mỗi hàng cao 630px
+        const rowYStarts = [160, 830];
+        const rowHeight = 630;
 
-        const yStart = rowYStarts[Math.min(row, 2)];
-        const yEnd = yStart + rowHeight;
-        const y = yStart + progress * (yEnd - yStart);
+        const yStart = rowYStarts[Math.min(row, 1)];
+        const y = yStart + progress * rowHeight;
         const paperZ = paperZ0 + (y / 1536) * paperLen;
 
-        const centerX = col === 0 ? -0.488 : 0.488;
+        if (isWide) {
+            return {
+                gantryZ: paperZ,
+                centerX: 0,
+                halfWidth: 0.72,
+            };
+        }
+
+        const centerX = col === 0 ? -0.48 : 0.48;
         return {
-            gantryZ: paperZ - headZOffset,
+            gantryZ: paperZ,
             centerX,
-            halfWidth: 0.38,
+            halfWidth: 0.36,
         };
     }
 
     /**
-     * Cập nhật tiến trình in từng dòng và vị trí đầu in trong Render Loop
+     * Cập nhật tiến trình nét vẽ từng dòng và vị trí cây bút trong Render Loop
      */
     private updatePrintAnimation(delta: number, time: number): void {
         if (!this.isPrintingActive || this.activeSlot === null || !this.activeEntry || !this.currentSheet) {
@@ -500,36 +507,40 @@ export class PrinterWorkshopScene {
         );
 
         const isSpecial = this.currentSheet.kind === 'special';
-        const targets = this.getSlotPrintheadTargets(this.activeSlot, this.printProgress, isSpecial);
+        const isWide = Boolean(this.activeEntry.isWide || this.activeEntry.frame === 'gold');
+        const targets = this.getSlotPrintheadTargets(this.activeSlot, this.printProgress, isSpecial, isWide);
 
-        // 1. Chuyển động thanh dầm (Gantry) di chuyển dọc thanh ray trục Z tới đúng hàng đang in
-        // và bám sát từng dòng vẽ từ trên xuống dưới
+        // 1. Chuyển động cây bút dọc theo trục Z bám sát scanline từ trên xuống dưới
         this.gantryBar.position.z = THREE.MathUtils.lerp(
             this.gantryBar.position.z,
             targets.gantryZ,
             Math.min(1.0, delta * 14)
         );
 
-        // 2. Chuyển động đầu in (Printhead) quét ngang trục X qua lại đúng khung ô avatar như cây bút đang vẽ
+        // 2. Chuyển động ngòi bút quét ngang trục X qua lại đúng khung avatar như đang vẽ
         const scanOscillation = Math.sin(time * 26) * targets.halfWidth;
         this.printHeadGroup.position.x = targets.centerX + scanOscillation;
+
+        // 3. Khi vẽ, ngòi bút hạ xuống mặt giấy (Y = 0.02) và hơi rung nhẹ tự nhiên
+        const sketchingJitter = Math.sin(time * 36) * 0.002;
+        this.printHeadGroup.position.y = 0.02 + sketchingJitter;
 
         // Khi in hoàn thành 100%
         if (this.printProgress >= 1.0) {
             this.isPrintingActive = false;
             this.setPrinterStatus('idle');
 
-            // Tắt tiếng máy in
+            // Tắt tiếng bút vẽ
             soundManager.stopPrintSound();
 
             // Phát tiếng chuông vàng và bùng nổ hạt lấp lánh nếu là khung vàng hoặc trang đặc biệt
             if (isSpecial) {
                 soundManager.playGoldChime();
                 this.particles.burstGrandCelebration(new THREE.Vector3(0, 0.05, 0.8));
-            } else if (this.activeEntry.frame === 'gold') {
+            } else if (this.activeEntry.frame === 'gold' || isWide) {
                 soundManager.playGoldChime();
-                const burstPos = this.getSlotWorldPosition(this.activeSlot);
-                this.particles.burstGoldSparkles(burstPos, 50);
+                const burstPos = this.getSlotWorldPosition(this.activeSlot, isWide);
+                this.particles.burstGoldSparkles(burstPos, 65);
             }
 
             // Gọi callback hoàn tất
@@ -600,11 +611,16 @@ export class PrinterWorkshopScene {
             if (this.isPrintingActive) {
                 this.updatePrintAnimation(delta, time);
             } else if (!this.isEjecting) {
-                // Khi nghỉ, đầu in nhẹ nhàng lướt về tâm máy và thanh dầm lùi về vị trí chờ (Home)
+                // Khi nghỉ, cây bút nhấc nhẹ lên khỏi mặt giấy và lùi về vị trí chờ (Home)
                 this.printHeadGroup.position.x = THREE.MathUtils.lerp(
                     this.printHeadGroup.position.x,
                     0,
                     delta * 4
+                );
+                this.printHeadGroup.position.y = THREE.MathUtils.lerp(
+                    this.printHeadGroup.position.y,
+                    0.08,
+                    delta * 6
                 );
                 this.gantryBar.position.z = THREE.MathUtils.lerp(
                     this.gantryBar.position.z,

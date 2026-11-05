@@ -42,6 +42,7 @@ export interface SheetEntry {
     username: string;
     avatarUrl: string | null;
     frame: FrameType;
+    isWide?: boolean;
 }
 
 export interface Sheet {

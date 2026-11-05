@@ -6,15 +6,16 @@ export interface EntryInput {
     username: string;
     avatarUrl: string | null;
     frame: FrameType;
+    isWide?: boolean;
 }
 
-/** Quản lý tờ giấy hiện tại và các vị trí avatar. Không biết gì về queue hay socket. */
+/** Quản lý tờ giấy hiện tại và các vị trí avatar (mặc định 4 avatar = 2 hàng x 2 cột; quà to chiếm nguyên 1 hàng). */
 export class SheetManager {
     private nextId = 1;
     private sheet: Sheet;
     completedCount = 0;
 
-    constructor(private readonly capacity: number) {
+    constructor(private readonly capacity: number = 4) {
         this.sheet = this.createSheet('standard');
     }
 
@@ -22,34 +23,109 @@ export class SheetManager {
         return this.sheet;
     }
 
-    /** Vị trí sẽ được in tiếp theo trên tờ hiện tại. */
+    /** Trạng thái chiếm chỗ của 2 hàng trên tờ hiện tại (Hàng 0: slot 0, 1; Hàng 1: slot 2, 3) */
+    public getRowStatus(sheet: Sheet = this.sheet) {
+        const row0Entries = sheet.entries.filter((e) => e.slot === 0 || e.slot === 1);
+        const row1Entries = sheet.entries.filter((e) => e.slot === 2 || e.slot === 3);
+
+        const row0HasWide = row0Entries.some((e) => e.isWide);
+        const row1HasWide = row1Entries.some((e) => e.isWide);
+
+        // Hàng 0 đầy nếu có quà to chiếm nguyên hàng hoặc đã đủ 2 avatar
+        const row0Full = row0HasWide || row0Entries.length >= 2;
+        // Hàng 1 đầy nếu có quà to chiếm nguyên hàng hoặc đã đủ 2 avatar
+        const row1Full = row1HasWide || row1Entries.length >= 2;
+
+        return {
+            row0Entries,
+            row1Entries,
+            row0HasWide,
+            row1HasWide,
+            row0Full,
+            row1Full,
+            isSheetFull: row0Full && row1Full,
+        };
+    }
+
+    /** Vị trí slot tiếp theo dự kiến */
+    public getNextSlot(isWide = false): number {
+        const status = this.getRowStatus();
+
+        if (isWide) {
+            // Quà to cần một hàng hoàn toàn trống
+            if (status.row0Entries.length === 0) return 0;
+            if (status.row1Entries.length === 0) return 2;
+            // Cả 2 hàng đều có người -> sẽ sang trang mới ở hàng 0
+            return 0;
+        }
+
+        // Quà bé / avatar thường: ưu tiên điền nốt hàng 0 rồi đến hàng 1
+        if (!status.row0Full) {
+            return status.row0Entries.some((e) => e.slot === 0) ? 1 : 0;
+        }
+        if (!status.row1Full) {
+            return status.row1Entries.some((e) => e.slot === 2) ? 3 : 2;
+        }
+        return 0;
+    }
+
     get nextSlot(): number {
-        return this.sheet.entries.length;
+        return this.getNextSlot(false);
     }
 
     hasUser(userId: string): boolean {
         return this.sheet.entries.some((e) => e.userId === userId);
     }
 
-    /** Thêm avatar vào tờ hiện tại. Nếu đủ ô thì hoàn tất tờ và trả về tờ đã hoàn tất. */
+    /** Thêm avatar vào tờ hiện tại. Hỗ trợ avatar quà to chiếm nguyên một hàng. */
     addEntry(input: EntryInput): { sheet: Sheet; completed: Sheet | null } {
-        const entry: SheetEntry = { slot: this.nextSlot, ...input };
-        this.sheet.entries.push(entry);
-        if (this.sheet.entries.length >= this.sheet.capacity) {
-            return { sheet: this.sheet, completed: this.rotate() };
+        const isWide = Boolean(input.isWide ?? (input.frame === 'gold'));
+        let status = this.getRowStatus();
+        let earlyCompletedSheet: Sheet | null = null;
+
+        // Nếu là quà to mà không có hàng nào trống hoàn toàn, hoặc tờ đã đầy:
+        if ((isWide && status.row0Entries.length > 0 && status.row1Entries.length > 0) || status.isSheetFull) {
+            earlyCompletedSheet = this.rotate();
+            status = this.getRowStatus();
         }
-        return { sheet: this.sheet, completed: null };
+
+        let slot: number;
+        if (isWide) {
+            slot = status.row0Entries.length === 0 ? 0 : 2;
+        } else {
+            if (!status.row0Full) {
+                slot = status.row0Entries.some((e) => e.slot === 0) ? 1 : 0;
+            } else {
+                slot = status.row1Entries.some((e) => e.slot === 2) ? 3 : 2;
+            }
+        }
+
+        const entry: SheetEntry = {
+            slot,
+            isWide,
+            ...input,
+        };
+        this.sheet.entries.push(entry);
+
+        // Sau khi thêm, kiểm tra tờ có đầy hoàn toàn không
+        const afterStatus = this.getRowStatus();
+        if (afterStatus.isSheetFull) {
+            const rotated = this.rotate();
+            return { sheet: this.sheet, completed: earlyCompletedSheet ?? rotated };
+        }
+
+        return { sheet: this.sheet, completed: earlyCompletedSheet };
     }
 
     /**
-     * In nguyên một trang: tờ đang dở (nếu có) được đẩy đi trước,
+     * In nguyên một trang (Full Page Special): tờ đang dở (nếu có) được đẩy đi trước,
      * rồi tạo tờ đặc biệt chỉ có 1 avatar và hoàn tất ngay.
      */
     addFullPage(input: EntryInput): Sheet[] {
         const completed: Sheet[] = [];
         if (this.sheet.entries.length > 0) completed.push(this.rotate());
         const special = this.createSheet('special', 1);
-        special.entries.push({ slot: 0, ...input });
+        special.entries.push({ slot: 0, isWide: true, ...input });
         special.completed = true;
         this.completedCount += 1;
         completed.push(special);

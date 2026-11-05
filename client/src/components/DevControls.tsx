@@ -211,13 +211,29 @@ export function DevControls({
     const handleTriggerOfflinePrint = (isGold = false) => {
         if (isAnimating || sheet.kind === 'special') return;
 
-        const occupiedSlots = new Set(sheet.entries.map((e) => e.slot));
-        let nextSlot = 0;
-        while (nextSlot < 6 && occupiedSlots.has(nextSlot)) {
-            nextSlot++;
+        const row0Entries = sheet.entries.filter((e) => e.slot === 0 || e.slot === 1);
+        const row1Entries = sheet.entries.filter((e) => e.slot === 2 || e.slot === 3);
+        const row0HasWide = row0Entries.some((e) => e.isWide);
+        const row1HasWide = row1Entries.some((e) => e.isWide);
+        const row0Full = row0HasWide || row0Entries.length >= 2;
+        const row1Full = row1HasWide || row1Entries.length >= 2;
+
+        let nextSlot = -1;
+        const isWide = isGold;
+
+        if (isWide) {
+            if (row0Entries.length === 0) nextSlot = 0;
+            else if (row1Entries.length === 0) nextSlot = 2;
+        } else {
+            if (!row0Full) {
+                nextSlot = row0Entries.some((e) => e.slot === 0) ? 1 : 0;
+            } else if (!row1Full) {
+                nextSlot = row1Entries.some((e) => e.slot === 2) ? 3 : 2;
+            }
         }
-        if (nextSlot >= 6) {
-            alert('Tờ in hiện tại đã đủ 6 ô! Bấm "Cuộn tờ mới" để sang tờ tiếp theo.');
+
+        if (nextSlot === -1 || (row0Full && row1Full)) {
+            alert('Tờ in hiện tại đã đủ 4 ô hoặc không còn hàng trống cho quà to! Bấm "Cuộn tờ mới" để sang tờ tiếp theo.');
             return;
         }
 
@@ -228,6 +244,7 @@ export function DevControls({
             username: isGold ? 'golden_fan_vip' : 'stream_viewer',
             avatarUrl: null,
             frame: isGold ? 'gold' : 'normal',
+            isWide,
         };
 
         setIsAnimating(true);
@@ -236,10 +253,14 @@ export function DevControls({
         printerRef.current?.printSlot(newEntry, 2.3, () => {
             setIsAnimating(false);
             setStatus('idle');
+            const newEntries = [...sheet.entries, newEntry].sort((a, b) => a.slot - b.slot);
+            const r0 = newEntries.filter((e) => e.slot === 0 || e.slot === 1);
+            const r1 = newEntries.filter((e) => e.slot === 2 || e.slot === 3);
+            const isFull = (r0.some((e) => e.isWide) || r0.length >= 2) && (r1.some((e) => e.isWide) || r1.length >= 2);
             setSheet({
                 ...sheet,
-                entries: [...sheet.entries, newEntry].sort((a, b) => a.slot - b.slot),
-                completed: sheet.entries.length + 1 >= 6,
+                entries: newEntries,
+                completed: isFull,
             });
         });
     };

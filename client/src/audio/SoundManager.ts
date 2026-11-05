@@ -90,11 +90,9 @@ class SoundManager {
         };
 
         tryPlayFile('/sounds/paper-friction.mp3', () => {
-            tryPlayFile('/sounds/paper-friction.wav', () => {
-                tryPlayFile('/sounds/printer-working.mp3', () => {
-                    // Nếu chưa có file mp3 thì dùng bộ tổng hợp âm thanh Web Audio API mô phỏng tiếng ngòi bút ma sát trên thớ giấy
-                    this.startSynthesizedPrintSound(isGold);
-                });
+            tryPlayFile('/sounds/printer-working.mp3', () => {
+                // Nếu chưa có file mp3 thì dùng bộ tổng hợp âm thanh Web Audio API mô phỏng tiếng ngòi bút ma sát trên thớ giấy
+                this.startSynthesizedPrintSound(isGold);
             });
         });
     }
@@ -334,10 +332,6 @@ class SoundManager {
             this.bgmAudio.volume = this.isMuted ? 0 : this.bgmVolume;
             this.bgmAudio.addEventListener('ended', () => {
                 this.playNextBgmTrack();
-            });
-            this.bgmAudio.addEventListener('error', () => {
-                // Tự động chuyển bài nếu file bị lỗi hoặc thiếu
-                setTimeout(() => this.playNextBgmTrack(), 500);
             });
         }
 

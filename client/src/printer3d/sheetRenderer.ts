@@ -140,35 +140,240 @@ export class SheetCanvasRenderer {
     ): void {
         const { width, height } = this.canvas;
 
-        // Lưới 2 cột x 3 hàng = 6 ô
-        const cols = 2;
-        const rows = 3;
-        const startX = 40;
-        const startY = 150;
-        const totalW = width - startX * 2;
-        const totalH = height - startY - 70;
+        // Bố cục mới: Khổ giấy 4 avatar (2 hàng x 2 cột)
+        // Nếu là "quà to" (isWide hoặc frame === 'gold'): chiếm nguyên một hàng và in avatar to hơn!
+        const startX = 46;
+        const startY = 160;
+        const totalW = width - startX * 2; // 932 px
+        const totalH = height - startY - 76; // 1300 px
 
-        const gapX = 30;
-        const gapY = 30;
-        const slotW = (totalW - gapX * (cols - 1)) / cols;
-        const slotH = (totalH - gapY * (rows - 1)) / rows;
+        const gapX = 36;
+        const gapY = 40;
+        const normalW = (totalW - gapX) / 2; // 448 px
+        const rowH = (totalH - gapY) / 2; // 630 px
+        const wideW = totalW; // 932 px
 
-        // Duyệt 6 slot (0..5)
-        for (let slotIdx = 0; slotIdx < 6; slotIdx++) {
-            const col = slotIdx % cols;
-            const row = Math.floor(slotIdx / cols);
-            const x = startX + col * (slotW + gapX);
-            const y = startY + row * (slotH + gapY);
+        // Duyệt 2 hàng (Hàng 0: slot 0, 1; Hàng 1: slot 2, 3)
+        for (let row = 0; row < 2; row++) {
+            const y = startY + row * (rowH + gapY);
+            const slotStart = row * 2;
 
-            if (slotIdx === activeSlot && activeEntry) {
-                // Ô ĐANG IN TIẾN TRÌNH DẦN TỪ TRÊN XUỐNG
-                this.renderActivePrintingSlot(x, y, slotW, slotH, slotIdx, activeEntry, progress, gleam);
+            const rowEntries = sheet.entries.filter((e) => e.slot === slotStart || e.slot === slotStart + 1);
+            const isRowWideActive =
+                (activeSlot === slotStart || activeSlot === slotStart + 1) &&
+                Boolean(activeEntry?.isWide || activeEntry?.frame === 'gold');
+            const rowWideEntry = isRowWideActive ? activeEntry : rowEntries.find((e) => e.isWide);
+
+            if (rowWideEntry || isRowWideActive) {
+                // HÀNG CHIẾM NGUYÊN BẰNG QUÀ TO
+                const slotIdx = slotStart;
+                if ((activeSlot === slotStart || activeSlot === slotStart + 1) && activeEntry) {
+                    this.renderActivePrintingWideSlot(startX, y, wideW, rowH, slotIdx, activeEntry, progress, gleam);
+                } else if (rowWideEntry) {
+                    this.renderStaticWideSlot(startX, y, wideW, rowH, slotIdx, rowWideEntry, gleam);
+                }
             } else {
-                // Ô BÌNH THƯỜNG (đã in xong hoặc ô trống)
-                const entry = sheet.entries.find((e) => e.slot === slotIdx);
-                this.renderStaticSlot(x, y, slotW, slotH, slotIdx, entry, gleam);
+                // HÀNG BÌNH THƯỜNG: 2 AVATAR (CỘT 0 VÀ CỘT 1)
+                for (let col = 0; col < 2; col++) {
+                    const slotIdx = slotStart + col;
+                    const x = startX + col * (normalW + gapX);
+
+                    if (slotIdx === activeSlot && activeEntry) {
+                        this.renderActivePrintingSlot(x, y, normalW, rowH, slotIdx, activeEntry, progress, gleam);
+                    } else {
+                        const entry = rowEntries.find((e) => e.slot === slotIdx);
+                        this.renderStaticSlot(x, y, normalW, rowH, slotIdx, entry, gleam);
+                    }
+                }
             }
         }
+    }
+
+    /**
+     * Vẽ ô quà to đang in tiến trình chiếm nguyên cả hàng
+     */
+    private renderActivePrintingWideSlot(
+        x: number,
+        y: number,
+        w: number,
+        h: number,
+        slotIdx: number,
+        entry: SheetEntry,
+        progress: number,
+        gleam: number
+    ): void {
+        const ctx = this.ctx;
+        const radius = 20;
+
+        // 1. Nền ô trống trước khi vẽ
+        ctx.fillStyle = '#fffdf7';
+        this.roundRect(ctx, x, y, w, h, radius);
+        ctx.fill();
+
+        ctx.save();
+        ctx.setLineDash([10, 10]);
+        ctx.strokeStyle = '#fde68a';
+        ctx.lineWidth = 3;
+        this.roundRect(ctx, x, y, w, h, radius);
+        ctx.stroke();
+        ctx.restore();
+
+        // 2. Cắt clip phần nội dung đã in từ trên xuống
+        const currentPrintH = Math.max(1, h * Math.min(progress, 1.0));
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(x - 8, y - 8, w + 16, currentPrintH + 8);
+        ctx.clip();
+
+        this.renderWideCardContent(x, y, w, h, slotIdx, entry, gleam);
+
+        ctx.restore();
+
+        // 3. Tia quét Laser / nét bút scanline ngang qua cả hàng
+        if (progress > 0 && progress < 1.0) {
+            const scanY = y + currentPrintH;
+            const beamGrad = ctx.createLinearGradient(x, scanY, x + w, scanY);
+            beamGrad.addColorStop(0, 'rgba(251, 191, 36, 0.2)');
+            beamGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.98)');
+            beamGrad.addColorStop(1, 'rgba(251, 191, 36, 0.2)');
+
+            ctx.save();
+            ctx.strokeStyle = beamGrad;
+            ctx.lineWidth = 5;
+            ctx.shadowColor = '#fbbf24';
+            ctx.shadowBlur = 16;
+            ctx.beginPath();
+            ctx.moveTo(x - 4, scanY);
+            ctx.lineTo(x + w + 4, scanY);
+            ctx.stroke();
+
+            // Chấm dither lấp lánh vàng
+            ctx.fillStyle = '#f59e0b';
+            for (let dot = 0; dot < 24; dot++) {
+                const dx = x + Math.random() * w;
+                const dy = scanY + (Math.random() * 8 - 4);
+                ctx.fillRect(dx, dy, 3, 3);
+            }
+            ctx.restore();
+        }
+    }
+
+    /**
+     * Vẽ ô quà to tĩnh chiếm nguyên một hàng
+     */
+    private renderStaticWideSlot(
+        x: number,
+        y: number,
+        w: number,
+        h: number,
+        slotIdx: number,
+        entry: SheetEntry,
+        gleam = 0.0
+    ): void {
+        this.renderWideCardContent(x, y, w, h, slotIdx, entry, gleam);
+    }
+
+    /**
+     * Nội dung thẻ quà to VIP chiếm nguyên một hàng (avatar to hơn nhiều, typography lộng lẫy)
+     */
+    private renderWideCardContent(
+        x: number,
+        y: number,
+        w: number,
+        h: number,
+        slotIdx: number,
+        entry: SheetEntry,
+        gleam: number
+    ): void {
+        const ctx = this.ctx;
+        const radius = 20;
+
+        // Nền thẻ quà to VIP
+        const bgGrad = ctx.createLinearGradient(x, y, x + w, y + h);
+        bgGrad.addColorStop(0, '#ffffff');
+        bgGrad.addColorStop(0.5, '#fffdf5');
+        bgGrad.addColorStop(1, '#fef9c3');
+        ctx.fillStyle = bgGrad;
+        this.roundRect(ctx, x, y, w, h, radius);
+        ctx.fill();
+
+        // Đổ bóng hoàng kim
+        ctx.save();
+        ctx.shadowColor = 'rgba(245, 158, 11, 0.35)';
+        ctx.shadowBlur = 20;
+        ctx.shadowOffsetY = 6;
+        this.roundRect(ctx, x, y, w, h, radius);
+        ctx.stroke();
+        ctx.restore();
+
+        // Khung viền vàng kép lộng lẫy
+        const goldGrad = ctx.createLinearGradient(x, y, x + w, y + h);
+        goldGrad.addColorStop(0, '#f59e0b');
+        goldGrad.addColorStop(0.25, '#fef08a');
+        goldGrad.addColorStop(0.7, '#d97706');
+        goldGrad.addColorStop(1, '#b45309');
+
+        ctx.lineWidth = 7;
+        ctx.strokeStyle = goldGrad;
+        this.roundRect(ctx, x, y, w, h, radius);
+        ctx.stroke();
+
+        // Viền chỉ vàng mảnh bên trong
+        ctx.save();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = 'rgba(217, 119, 6, 0.5)';
+        this.roundRect(ctx, x + 8, y + 8, w - 16, h - 16, radius - 4);
+        ctx.stroke();
+        ctx.restore();
+
+        // Hiệu ứng ánh kim quét qua (Gleam sweep)
+        if (gleam > 0) {
+            const gleamX = x - w + gleam * (w * 2);
+            const sweepGrad = ctx.createLinearGradient(gleamX, y, gleamX + 100, y + h);
+            sweepGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+            sweepGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.9)');
+            sweepGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+            ctx.save();
+            ctx.lineWidth = 10;
+            ctx.strokeStyle = sweepGrad;
+            this.roundRect(ctx, x, y, w, h, radius);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // 1. Avatar to hơn hẳn (đường kính ~340px) đặt ở bên trái
+        const avatarSize = Math.min(340, h - 70);
+        const avatarX = x + 48;
+        const avatarY = y + (h - avatarSize) / 2;
+
+        this.drawAvatar(avatarX, avatarY, avatarSize, entry.avatarUrl, entry.username, true);
+
+        // 2. Khu vực thông tin VIP ở bên phải
+        const textStartX = avatarX + avatarSize + 48;
+        const textCenterY = y + h / 2;
+
+        // Huy hiệu VIP lớn
+        this.renderBadge(textStartX + 95, textCenterY - 110, '👑 VIP GOLD • BIG GIFT', '#d97706', '#fef3c7');
+
+        // Tên Username to, nổi bật
+        ctx.font = 'bold 36px "Segoe UI", system-ui, sans-serif';
+        ctx.fillStyle = '#0f172a';
+        ctx.textAlign = 'left';
+        const displayUser = entry.username.length > 20 ? entry.username.slice(0, 19) + '…' : entry.username;
+        ctx.fillText(displayUser, textStartX, textCenterY - 30);
+
+        // Dòng phụ cảm ơn & vinh danh
+        ctx.font = '600 20px "Segoe UI", system-ui, sans-serif';
+        ctx.fillStyle = '#b45309';
+        ctx.fillText('✨ QUÀ TO ĐẶC BIỆT CHIẾM TRỌN HÀNG ✨', textStartX, textCenterY + 25);
+
+        // Thông tin slot hàng
+        ctx.font = '600 16px monospace';
+        ctx.fillStyle = '#94a3b8';
+        const rowNum = slotIdx < 2 ? 1 : 2;
+        ctx.fillText(`★ HÀNG ${rowNum} • TOÀN KHỔ VIP BANNER`, textStartX, textCenterY + 75);
     }
 
     /**
@@ -356,25 +561,25 @@ export class SheetCanvasRenderer {
             ctx.stroke();
         }
 
-        // Kích thước Avatar trong ô
-        const avatarSize = Math.min(w * 0.48, h * 0.52);
+        // Kích thước Avatar trong ô (khổ 4 avatar lớn và rõ nét)
+        const avatarSize = Math.min(w * 0.62, h * 0.5);
         const avatarX = x + (w - avatarSize) / 2;
-        const avatarY = y + 25;
+        const avatarY = y + 36;
 
         // Vẽ ảnh Avatar
         this.drawAvatar(avatarX, avatarY, avatarSize, entry.avatarUrl, entry.username, isGold);
 
         // Vẽ tên Username
-        ctx.font = 'bold 22px "Segoe UI", system-ui, sans-serif';
+        ctx.font = 'bold 26px "Segoe UI", system-ui, sans-serif';
         ctx.fillStyle = '#0f172a';
         ctx.textAlign = 'center';
         const displayUser = entry.username.length > 15 ? entry.username.slice(0, 14) + '…' : entry.username;
-        ctx.fillText(displayUser, x + w / 2, avatarY + avatarSize + 36);
+        ctx.fillText(displayUser, x + w / 2, avatarY + avatarSize + 44);
 
-        // Nhãn số slot nhỏ
-        ctx.font = '600 13px monospace';
+        // Nhãn số slot
+        ctx.font = '600 15px monospace';
         ctx.fillStyle = isGold ? '#b45309' : '#94a3b8';
-        ctx.fillText(`PFP #${slotIdx + 1}`, x + w / 2, avatarY + avatarSize + 60);
+        ctx.fillText(`PFP #${slotIdx + 1}`, x + w / 2, avatarY + avatarSize + 74);
     }
 
     private drawAvatar(

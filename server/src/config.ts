@@ -15,8 +15,8 @@ export const config = {
     port: num('PORT', 3001),
     clientOrigin: process.env['CLIENT_ORIGIN'] ?? 'http://localhost:5173',
     printer: {
-        /** Số avatar trên mỗi tờ. */
-        sheetCapacity: num('SHEET_CAPACITY', 6),
+        /** Số avatar trên mỗi tờ (mặc định 4 avatar: 2 hàng x 2 cột). */
+        sheetCapacity: num('SHEET_CAPACITY', 4),
         /** Thời gian in một avatar ở tốc độ x1 (ms). */
         basePrintMs: num('BASE_PRINT_MS', 2500),
         /** Hệ số thời gian cho trang đặc biệt (in nguyên trang). */

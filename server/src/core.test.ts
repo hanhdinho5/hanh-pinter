@@ -7,7 +7,7 @@ const fast: AppConfig = { ...config, printer: { ...config.printer, basePrintMs: 
 
 const comment = (userId: string) => ({ type: 'COMMENT' as const, userId, username: userId });
 
-test('comment/follow được xử lý tuần tự, đủ 6 ảnh thì sang tờ mới', async () => {
+test('comment/follow được xử lý tuần tự, đủ 4 ảnh thì sang tờ mới', async () => {
     const { handler, engine, sheets, bus } = createCore(fast);
     const order: string[] = [];
     let concurrent = 0;
@@ -21,12 +21,12 @@ test('comment/follow được xử lý tuần tự, đủ 6 ảnh thì sang tờ
     const completedSheets: number[] = [];
     bus.on('printer:sheet:completed', (s) => completedSheets.push(s.entries.length));
 
-    for (let i = 1; i <= 7; i++) handler.handle(i % 2 ? comment(`u${i}`) : { ...comment(`u${i}`), type: 'FOLLOW' });
+    for (let i = 1; i <= 5; i++) handler.handle(i % 2 ? comment(`u${i}`) : { ...comment(`u${i}`), type: 'FOLLOW' });
     await engine.idle();
 
-    assert.deepEqual(order, ['u1', 'u2', 'u3', 'u4', 'u5', 'u6', 'u7']);
+    assert.deepEqual(order, ['u1', 'u2', 'u3', 'u4', 'u5']);
     assert.equal(maxConcurrent, 1);
-    assert.deepEqual(completedSheets, [6]);
+    assert.deepEqual(completedSheets, [4]);
     assert.equal(sheets.current.entries.length, 1);
 });
 
@@ -84,5 +84,20 @@ test('không mất job khi nhận nhiều event liên tục', async () => {
     const { handler, engine, sheets } = createCore({ ...fast, queue: { maxFree: 1000 } });
     for (let i = 0; i < 50; i++) handler.handle(comment(`m${i}`));
     await engine.idle();
-    assert.equal(sheets.completedCount * 6 + sheets.current.entries.length, 50);
+    assert.equal(sheets.completedCount * 4 + sheets.current.entries.length, 50);
+});
+
+test('quà to (gold) chiếm nguyên 1 hàng, 2 quà to là đủ 1 tờ', async () => {
+    const { handler, engine, sheets, bus } = createCore(fast);
+    const completedSheets: number[] = [];
+    bus.on('printer:sheet:completed', (s) => completedSheets.push(s.entries.length));
+
+    // Quà to 1 -> Hàng 0 (slot 0, isWide: true)
+    handler.handle({ type: 'GIFT', userId: 'vip1', username: 'VIP 1', diamondCount: 150 });
+    // Quà to 2 -> Hàng 1 (slot 2, isWide: true) -> đầy 2 hàng -> sang tờ mới!
+    handler.handle({ type: 'GIFT', userId: 'vip2', username: 'VIP 2', diamondCount: 200 });
+    await engine.idle();
+
+    assert.deepEqual(completedSheets, [2]); // Tờ đã hoàn tất có 2 quà to chiếm trọn 2 hàng
+    assert.equal(sheets.completedCount, 1);
 });
