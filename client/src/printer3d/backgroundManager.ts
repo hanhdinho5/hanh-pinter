@@ -80,6 +80,9 @@ export class BackgroundManager {
     private rotateIntervalSeconds = 300; // Mặc định 5 phút
     private autoRotateTimer = 0.0;
 
+    private scene: THREE.Scene | null = null;
+    private container: HTMLElement | null = null;
+
     // Tham chiếu tới các đồ vật trong xưởng để ẩn/hiện khi đổi giữa ngoài trời và trong xưởng
     private workshopProps: THREE.Object3D[] = [];
 
@@ -90,7 +93,7 @@ export class BackgroundManager {
         this.group = new THREE.Group();
         this.group.name = 'BackgroundManager';
 
-        // Tạo 2 tấm quad nền đặt ở vị trí sau lưng máy in (Z = -2.45)
+        // Tạo 2 tấm quad nền dự phòng
         const bgGeo = new THREE.PlaneGeometry(10.5, 8.2);
 
         const matA = new THREE.MeshBasicMaterial({
@@ -100,6 +103,7 @@ export class BackgroundManager {
         });
         this.quadA = new THREE.Mesh(bgGeo, matA);
         this.quadA.position.set(0, 3.6, -2.48);
+        this.quadA.visible = false;
         this.group.add(this.quadA);
 
         const matB = new THREE.MeshBasicMaterial({
@@ -109,14 +113,18 @@ export class BackgroundManager {
         });
         this.quadB = new THREE.Mesh(bgGeo.clone(), matB);
         this.quadB.position.set(0, 3.6, -2.47);
+        this.quadB.visible = false;
         this.group.add(this.quadB);
+    }
 
-        // Khởi tạo nền đầu tiên (mountain-mist theo ảnh mẫu)
+    public setSceneAndContainer(scene: THREE.Scene, container: HTMLElement): void {
+        this.scene = scene;
+        this.container = container;
         this.applyPreset(this.currentPresetId, false);
     }
 
     /**
-     * Đăng ký các đồ vật workshop (bức tường gỗ, giá kệ, bảng dụng cụ, đèn bàn)
+     * Đăng ký các đồ vật workshop (bàn gỗ, rãnh xẻ, bức tường gỗ, giá kệ, bảng dụng cụ, đèn bàn)
      * để ẩn đi khi ở chế độ phong cảnh ngoài trời.
      */
     public registerWorkshopProps(props: THREE.Object3D[]): void {
@@ -125,13 +133,10 @@ export class BackgroundManager {
     }
 
     private updateWorkshopPropsVisibility(isOutdoor: boolean): void {
-        // Khi ở chế độ ngoài trời, ẩn tường gỗ trong nhà để mở rộng tầm nhìn
+        // Khi ở chế độ ngoài trời, ẩn toàn bộ đồ gỗ xưởng mộc để lộ toàn cảnh núi non phía sau
         this.workshopProps.forEach((prop) => {
             prop.visible = !isOutdoor;
         });
-        // Hiện background plane khi ở ngoài trời
-        this.quadA.visible = isOutdoor;
-        this.quadB.visible = isOutdoor;
     }
 
     /**
@@ -249,12 +254,38 @@ export class BackgroundManager {
     }
 
     /**
-     * Chuyển đổi sang một Background Preset với hiệu ứng Cross-Fade mờ dần
+     * Chuyển đổi sang một Background Preset
      */
     public applyPreset(presetId: string, animated = true): void {
         const preset = BACKGROUND_PRESETS.find((p) => p.id === presetId) ?? BACKGROUND_PRESETS[0];
         this.currentPresetId = preset.id;
         this.updateWorkshopPropsVisibility(preset.isOutdoor);
+
+        // 1. Cập nhật nền CSS trên container (hiển thị lập tức, không phụ thuộc WebGL)
+        if (this.container) {
+            if (preset.isOutdoor && preset.url) {
+                this.container.style.backgroundImage = `url("${preset.url}")`;
+                this.container.style.backgroundSize = 'cover';
+                this.container.style.backgroundPosition = 'center';
+                this.container.style.backgroundRepeat = 'no-repeat';
+            } else {
+                this.container.style.backgroundImage = 'none';
+                this.container.style.backgroundColor = preset.isOutdoor ? '#0a0c10' : '#0e0a07';
+            }
+        }
+
+        // 2. Cập nhật Three.js scene.background
+        if (this.scene) {
+            if (preset.isOutdoor) {
+                this.loadPresetTexture(preset, (newTex) => {
+                    if (this.scene && this.currentPresetId === preset.id) {
+                        this.scene.background = newTex;
+                    }
+                });
+            } else {
+                this.scene.background = null;
+            }
+        }
 
         if (!preset.isOutdoor) {
             return;
@@ -282,6 +313,25 @@ export class BackgroundManager {
             this.isCrossFading = true;
             this.crossFadeProgress = 0.0;
         });
+    }
+
+    /**
+     * Nạp ảnh tự chọn của người dùng (Data URL từ file upload)
+     */
+    public applyCustomImage(dataUrl: string): void {
+        const customId = `custom-${Date.now()}`;
+        const customPreset: BackgroundPreset = {
+            id: customId,
+            name: 'Ảnh Bạn Vừa Tải',
+            url: dataUrl,
+            isOutdoor: true,
+            keyLightColor: 0xffedd5,
+            ambientColor: 0xe0f2fe,
+            badge: '🖼️ TỰ CHỌN',
+        };
+        BACKGROUND_PRESETS.unshift(customPreset);
+        this.applyPreset(customId, true);
+        this.onBackgroundChanged?.(customId);
     }
 
     /**
@@ -364,3 +414,4 @@ export class BackgroundManager {
         this.textureCache.clear();
     }
 }
+

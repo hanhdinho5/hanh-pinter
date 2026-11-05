@@ -26,10 +26,10 @@ export class BirdFlockSystem {
     private flightDuration = 10.0; // giây để bay hết bầu trời
     private nextFlightTimer = 5.0; // Khởi động chuyến bay đầu sau 5s
 
-    private startX = -4.8;
-    private endX = 4.8;
-    private flightY = 3.6;
-    private flightZ = -2.2;
+    private startX = -6.5;
+    private endX = 6.5;
+    private flightY = 4.2;
+    private flightZ = -8.5;
     private direction = 1; // 1: trái qua phải, -1: phải qua trái
 
     constructor() {
@@ -106,11 +106,11 @@ export class BirdFlockSystem {
         this.isFlying = true;
         this.flightProgress = 0.0;
         this.direction = Math.random() > 0.5 ? 1 : -1;
-        this.startX = this.direction === 1 ? -4.8 : 4.8;
-        this.endX = this.direction === 1 ? 4.8 : -4.8;
-        this.flightY = 3.2 + Math.random() * 0.8;
-        this.flightZ = -2.0 - Math.random() * 0.6;
-        this.flightDuration = 8.5 + Math.random() * 3.5;
+        this.startX = this.direction === 1 ? -6.5 : 6.5;
+        this.endX = this.direction === 1 ? 6.5 : -6.5;
+        this.flightY = 3.8 + Math.random() * 0.8;
+        this.flightZ = -8.0 - Math.random() * 1.5;
+        this.flightDuration = 9.5 + Math.random() * 3.5;
     }
 
     /**
@@ -183,3 +183,4 @@ export class BirdFlockSystem {
         });
     }
 }
+

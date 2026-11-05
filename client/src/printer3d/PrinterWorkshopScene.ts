@@ -85,6 +85,7 @@ export class PrinterWorkshopScene {
         this.renderer = new THREE.WebGLRenderer({
             antialias: true,
             powerPreference: 'high-performance',
+            alpha: true,
         });
         this.renderer.setSize(container.clientWidth, container.clientHeight);
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -99,6 +100,7 @@ export class PrinterWorkshopScene {
 
         // 5. Khởi tạo Background & Sinh vật tự nhiên
         this.backgroundManager = new BackgroundManager();
+        this.backgroundManager.setSceneAndContainer(this.scene, container);
         this.mistLayerSystem = new MistLayerSystem();
         this.birdFlockSystem = new BirdFlockSystem();
         this.butterflySystem = new ButterflySystem();
@@ -172,12 +174,14 @@ export class PrinterWorkshopScene {
         table.receiveShadow = true;
         this.scene.add(table);
 
+        const grooves: THREE.Mesh[] = [];
         const grooveMat = new THREE.MeshBasicMaterial({ color: 0x140b05 });
         for (let gz = -2.5; gz <= 4.0; gz += 0.85) {
             const grooveGeo = new THREE.BoxGeometry(8.02, 0.005, 0.015);
             const groove = new THREE.Mesh(grooveGeo, grooveMat);
             groove.position.set(0, 0.003, gz);
             this.scene.add(groove);
+            grooves.push(groove);
         }
 
         const wallTex = createWoodTexture(1024, 1024, true);
@@ -202,8 +206,8 @@ export class PrinterWorkshopScene {
         const { lampGroup } = createVintageDeskLamp();
         this.scene.add(lampGroup);
 
-        // Đăng ký các đồ vật xưởng mộc để ẩn đi khi chuyển sang phong cảnh ngoài trời
-        this.backgroundManager.registerWorkshopProps([wall, pegboard, shelf, lampGroup]);
+        // Đăng ký toàn bộ các đồ vật xưởng mộc (bàn, rãnh xẻ, tường gỗ, kệ, đèn) để ẩn đi khi ở ngoài trời
+        this.backgroundManager.registerWorkshopProps([table, ...grooves, wall, pegboard, shelf, lampGroup]);
     }
 
     private createPlotterPrinter() {
@@ -692,6 +696,10 @@ export class PrinterWorkshopScene {
 
     public setBackground(presetId: string): void {
         this.backgroundManager.applyPreset(presetId, true);
+    }
+
+    public applyCustomBackground(dataUrl: string): void {
+        this.backgroundManager.applyCustomImage(dataUrl);
     }
 
     public setAutoRotate(enabled: boolean, intervalMinutes?: number): void {

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { PrinterCanvas, type PrinterCanvasHandle } from '../printer3d/PrinterCanvas';
 import { usePrinterSocket } from '../socket/usePrinterSocket';
 import { soundManager } from '../audio/SoundManager';
+import { QuickBackgroundBar } from './QuickBackgroundBar';
+import { api } from '../socket/socketClient';
 import type { Sheet, SheetEntry, PrintJob } from '../types';
 
 export function OverlayView() {
@@ -126,6 +128,36 @@ export function OverlayView() {
                 rotateIntervalMinutes={backgroundConfig?.intervalMinutes ?? 5}
                 showButterflies={backgroundConfig?.showButterflies ?? true}
                 showBirds={backgroundConfig?.showBirds ?? true}
+            />
+
+            {/* Thanh điều khiển chọn Background nhanh (luôn có sẵn để đổi ảnh) */}
+            <QuickBackgroundBar
+                currentPresetId={backgroundConfig?.presetId ?? 'mountain-mist'}
+                onSelectPreset={(presetId) => {
+                    printerRef.current?.setBackground(presetId);
+                    void api.setBackgroundConfig({ presetId });
+                }}
+                onUploadCustomImage={(dataUrl) => {
+                    printerRef.current?.applyCustomBackground(dataUrl);
+                }}
+                autoRotate={backgroundConfig?.autoRotate ?? false}
+                onToggleAutoRotate={(enabled) => {
+                    printerRef.current?.setAutoRotate(enabled, 5);
+                    void api.setBackgroundConfig({ autoRotate: enabled });
+                }}
+                showButterflies={backgroundConfig?.showButterflies ?? true}
+                onToggleButterflies={(enabled) => {
+                    printerRef.current?.setCreaturesVisible(enabled, backgroundConfig?.showBirds ?? true);
+                    void api.setBackgroundConfig({ showButterflies: enabled });
+                }}
+                showBirds={backgroundConfig?.showBirds ?? true}
+                onToggleBirds={(enabled) => {
+                    printerRef.current?.setCreaturesVisible(backgroundConfig?.showButterflies ?? true, enabled);
+                    void api.setBackgroundConfig({ showBirds: enabled });
+                }}
+                onTriggerBirds={() => {
+                    printerRef.current?.triggerBirdFlock();
+                }}
             />
 
             {/* Trạng thái kết nối nhỏ ở góc trên cho streamer kiểm tra */}

@@ -8,6 +8,7 @@ export interface PrinterCanvasHandle {
     ejectSheet: (nextSheet: Sheet, onComplete?: () => void) => void;
     setCameraPreset: (preset: 'stream' | 'closeup' | 'overview') => void;
     setBackground: (presetId: string) => void;
+    applyCustomBackground: (dataUrl: string) => void;
     setAutoRotate: (enabled: boolean, intervalMinutes?: number) => void;
     setCreaturesVisible: (butterflies: boolean, birds: boolean) => void;
     triggerBirdFlock: () => void;
@@ -58,6 +59,9 @@ export const PrinterCanvas = forwardRef<PrinterCanvasHandle, PrinterCanvasProps>
             },
             setBackground(presetId) {
                 sceneRef.current?.setBackground(presetId);
+            },
+            applyCustomBackground(dataUrl) {
+                sceneRef.current?.applyCustomBackground(dataUrl);
             },
             setAutoRotate(enabled, intervalMinutes) {
                 sceneRef.current?.setAutoRotate(enabled, intervalMinutes);

@@ -13,10 +13,9 @@ interface ButterflyInstance {
 }
 
 /**
- * Hệ thống đàn bướm 3D tự nhiên dập dờn bay lượn quanh máy in và không gian bàn làm việc.
- * - Vỗ cánh nhịp nhàng theo chu kỳ hình sin.
- * - Quỹ đạo bay lượn lơ lửng, uốn lượn tự nhiên theo vector hướng bay.
- * - Cánh bướm 3D có độ bóng nhẹ và phát quang màu sắc rực rỡ.
+ * Hệ thống đàn bướm 3D tự nhiên bay lượn ở PHÍA SAU tờ giấy (cách 6 - 10 mét trên không trung).
+ * - Cánh bướm phát sáng rực rỡ (MeshBasicMaterial không bị bóng đen làm tối).
+ * - Bay lơ lửng trên nền trời thung lũng núi non phía sau máy in.
  */
 export class ButterflySystem {
     public group: THREE.Group;
@@ -29,123 +28,131 @@ export class ButterflySystem {
         this.createFlock();
     }
 
-    private createButterflyWingTexture(colorA: string, colorB: string, spotColor: string): THREE.CanvasTexture {
+    private createGlowingWingTexture(colorA: string, colorB: string, spotColor: string): THREE.CanvasTexture {
         const canvas = document.createElement('canvas');
-        canvas.width = 128;
-        canvas.height = 128;
+        canvas.width = 256;
+        canvas.height = 256;
         const ctx = canvas.getContext('2d')!;
 
-        // Nền cánh chuyển sắc
-        const grad = ctx.createRadialGradient(20, 20, 5, 64, 64, 70);
-        grad.addColorStop(0, colorA);
-        grad.addColorStop(0.6, colorB);
-        grad.addColorStop(1, '#050508');
+        // Nền cánh chuyển sắc rực rỡ
+        const grad = ctx.createRadialGradient(40, 40, 10, 128, 128, 150);
+        grad.addColorStop(0, '#ffffff');
+        grad.addColorStop(0.25, colorA);
+        grad.addColorStop(0.7, colorB);
+        grad.addColorStop(1, 'rgba(10, 15, 30, 0.9)');
         ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, 128, 128);
+        ctx.fillRect(0, 0, 256, 256);
 
-        // Gân cánh bướm
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
-        ctx.lineWidth = 2;
+        // Gân cánh bướm phát sáng
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+        ctx.lineWidth = 3;
         ctx.beginPath();
-        for (let a = 0; a < 6; a++) {
-            ctx.moveTo(10, 10);
-            ctx.quadraticCurveTo(40 + a * 12, 30 + a * 14, 110, 20 + a * 20);
+        for (let a = 0; a < 8; a++) {
+            ctx.moveTo(20, 20);
+            ctx.quadraticCurveTo(70 + a * 18, 50 + a * 20, 220, 30 + a * 28);
         }
         ctx.stroke();
 
-        // Chấm hoa văn cánh ngoài
+        // Chấm hoa văn phát sáng lấp lánh ở viền cánh
         ctx.fillStyle = spotColor;
-        for (let i = 0; i < 7; i++) {
+        for (let i = 0; i < 9; i++) {
             ctx.beginPath();
-            ctx.arc(115 - i * 6, 25 + i * 14, 3, 0, Math.PI * 2);
+            ctx.arc(230 - i * 10, 40 + i * 22, 6, 0, Math.PI * 2);
             ctx.fill();
         }
 
         const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
         texture.wrapS = THREE.ClampToEdgeWrapping;
         texture.wrapT = THREE.ClampToEdgeWrapping;
         return texture;
     }
 
     private createFlock(): void {
-        // Cấu hình các con bướm với màu sắc và quỹ đạo riêng biệt
+        // Cấu hình các con bướm ở cự ly PHÍA SAU tờ giấy (Z = -5.0 đến -8.5 mét, Y = 1.8 đến 3.5 mét)
         const butterflyConfigs = [
             {
-                name: 'Morpho Blue',
+                name: 'Morpho Cyan (Lam Ngọc)',
                 colorA: '#38bdf8',
                 colorB: '#0284c7',
-                spot: '#ffffff',
-                basePos: new THREE.Vector3(-0.7, 0.65, 0.4),
-                radius: { x: 0.55, y: 0.28, z: 0.6 },
-                speed: 0.75,
-                flapSpeed: 16,
-                scale: 0.85,
-            },
-            {
-                name: 'Amber Gold',
-                colorA: '#fde047',
-                colorB: '#d97706',
-                spot: '#fffbeb',
-                basePos: new THREE.Vector3(0.65, 0.8, 0.9),
-                radius: { x: 0.65, y: 0.32, z: 0.55 },
-                speed: 0.6,
+                spot: '#e0f2fe',
+                // Nằm sâu phía sau tờ giấy (Z = -6.5)
+                basePos: new THREE.Vector3(-1.8, 2.6, -6.5),
+                radius: { x: 1.2, y: 0.6, z: 1.0 },
+                speed: 0.65,
                 flapSpeed: 14,
-                scale: 0.95,
+                scale: 2.8,
             },
             {
-                name: 'Emerald Teal',
-                colorA: '#34d399',
+                name: 'Golden Amber (Hổ Phách Vàng)',
+                colorA: '#fde047',
+                colorB: '#f59e0b',
+                spot: '#fffbeb',
+                basePos: new THREE.Vector3(1.6, 3.1, -7.8),
+                radius: { x: 1.4, y: 0.7, z: 1.1 },
+                speed: 0.55,
+                flapSpeed: 13,
+                scale: 3.2,
+            },
+            {
+                name: 'Emerald Jade (Ngọc Lục Bảo)',
+                colorA: '#4ade80',
                 colorB: '#059669',
                 spot: '#ecfdf5',
-                basePos: new THREE.Vector3(0.1, 0.9, -0.1),
-                radius: { x: 0.5, y: 0.3, z: 0.5 },
-                speed: 0.85,
-                flapSpeed: 18,
-                scale: 0.8,
+                basePos: new THREE.Vector3(0.2, 2.2, -5.8),
+                radius: { x: 1.0, y: 0.5, z: 0.8 },
+                speed: 0.75,
+                flapSpeed: 16,
+                scale: 2.5,
             },
             {
-                name: 'Violet Dream',
-                colorA: '#c084fc',
-                colorB: '#7e22ce',
-                spot: '#fdf4ff',
-                basePos: new THREE.Vector3(-0.3, 0.75, 1.3),
-                radius: { x: 0.6, y: 0.25, z: 0.65 },
+                name: 'Amethyst Violet (Tím Thạch Anh)',
+                colorA: '#e879f9',
+                colorB: '#9333ea',
+                spot: '#faf5ff',
+                basePos: new THREE.Vector3(-0.9, 3.4, -8.5),
+                radius: { x: 1.5, y: 0.65, z: 1.2 },
+                speed: 0.6,
+                flapSpeed: 14,
+                scale: 3.0,
+            },
+            {
+                name: 'Ruby Rose (Hồng Ngọc)',
+                colorA: '#fb7185',
+                colorB: '#e11d48',
+                spot: '#fff1f2',
+                basePos: new THREE.Vector3(1.1, 2.5, -6.0),
+                radius: { x: 1.1, y: 0.55, z: 0.9 },
                 speed: 0.7,
                 flapSpeed: 15,
-                scale: 0.9,
+                scale: 2.6,
             },
         ];
 
-        // Hình dạng cánh bướm cong mềm mại (Butterfly Wing Shape)
+        // Hình dạng cánh bướm mềm mại
         const wingShape = new THREE.Shape();
         wingShape.moveTo(0, 0);
-        wingShape.bezierCurveTo(0.04, 0.08, 0.12, 0.11, 0.14, 0.05);
-        wingShape.bezierCurveTo(0.15, -0.01, 0.09, -0.06, 0.06, -0.08);
-        wingShape.bezierCurveTo(0.03, -0.09, 0.01, -0.05, 0, 0);
+        wingShape.bezierCurveTo(0.05, 0.1, 0.14, 0.13, 0.16, 0.06);
+        wingShape.bezierCurveTo(0.17, -0.01, 0.11, -0.07, 0.07, -0.1);
+        wingShape.bezierCurveTo(0.04, -0.11, 0.01, -0.06, 0, 0);
 
         const wingGeo = new THREE.ShapeGeometry(wingShape);
         wingGeo.center();
-        // Dịch tâm xoay về mép cánh để khi vỗ cánh xoay quanh khớp thân
-        wingGeo.translate(0.07, 0, 0);
+        wingGeo.translate(0.08, 0, 0);
 
-        const bodyGeo = new THREE.CylinderGeometry(0.006, 0.004, 0.07, 8);
-        const bodyMat = new THREE.MeshStandardMaterial({
-            color: 0x111827,
-            roughness: 0.6,
-            metalness: 0.2,
-        });
+        const bodyGeo = new THREE.CylinderGeometry(0.008, 0.005, 0.09, 8);
+        const bodyMat = new THREE.MeshBasicMaterial({ color: 0x1e293b });
 
         butterflyConfigs.forEach((cfg, idx) => {
             const bGroup = new THREE.Group();
 
-            const tex = this.createButterflyWingTexture(cfg.colorA, cfg.colorB, cfg.spot);
-            const wingMat = new THREE.MeshStandardMaterial({
+            const tex = this.createGlowingWingTexture(cfg.colorA, cfg.colorB, cfg.spot);
+            // Dùng MeshBasicMaterial để cánh bướm luôn rực rỡ, không bị bóng đổ biến thành màu đen
+            const wingMat = new THREE.MeshBasicMaterial({
                 map: tex,
-                roughness: 0.35,
-                metalness: 0.15,
                 side: THREE.DoubleSide,
                 transparent: true,
-                opacity: 0.95,
+                opacity: 0.92,
             });
 
             // Thân bướm
@@ -156,7 +163,7 @@ export class ButterflySystem {
             // Cánh trái
             const wingLeftGroup = new THREE.Group();
             const wingLeft = new THREE.Mesh(wingGeo, wingMat);
-            wingLeft.position.set(0.005, 0, 0);
+            wingLeft.position.set(0.006, 0, 0);
             wingLeftGroup.add(wingLeft);
             bGroup.add(wingLeftGroup);
 
@@ -164,10 +171,11 @@ export class ButterflySystem {
             const wingRightGroup = new THREE.Group();
             const wingRight = new THREE.Mesh(wingGeo, wingMat);
             wingRight.rotation.y = Math.PI;
-            wingRight.position.set(-0.005, 0, 0);
+            wingRight.position.set(-0.006, 0, 0);
             wingRightGroup.add(wingRight);
             bGroup.add(wingRightGroup);
 
+            // Phóng to phù hợp với khoảng cách xa 6 - 10 mét
             bGroup.scale.setScalar(cfg.scale);
 
             this.group.add(bGroup);
@@ -180,7 +188,7 @@ export class ButterflySystem {
                 orbitRadius: cfg.radius,
                 speed: cfg.speed,
                 flapSpeed: cfg.flapSpeed,
-                phaseOffset: idx * 1.85,
+                phaseOffset: idx * 1.7,
                 currentPos: cfg.basePos.clone(),
             });
         });
@@ -196,27 +204,26 @@ export class ButterflySystem {
             const t = time * b.speed + b.phaseOffset;
 
             // 1. Chuyển động vỗ cánh hình sin
-            const flap = Math.sin(time * b.flapSpeed + b.phaseOffset) * 0.72;
+            const flap = Math.sin(time * b.flapSpeed + b.phaseOffset) * 0.75;
             b.wingLeft.rotation.y = flap;
             b.wingRight.rotation.y = -flap;
 
-            // 2. Quỹ đạo bay lượn uốn khúc mềm mại (Lissajous curves)
+            // 2. Quỹ đạo bay lượn uốn khúc mềm mại ở không gian xa phía sau tờ giấy
             const targetX =
                 b.basePos.x +
-                Math.sin(t * 0.9) * b.orbitRadius.x +
-                Math.sin(t * 2.1) * 0.12;
+                Math.sin(t * 0.8) * b.orbitRadius.x +
+                Math.sin(t * 1.9) * 0.3;
 
             const targetY =
                 b.basePos.y +
-                Math.sin(t * 1.4) * b.orbitRadius.y +
-                Math.cos(t * 0.7) * 0.08;
+                Math.sin(t * 1.2) * b.orbitRadius.y +
+                Math.cos(t * 0.6) * 0.2;
 
             const targetZ =
                 b.basePos.z +
-                Math.cos(t * 0.75) * b.orbitRadius.z +
-                Math.cos(t * 1.8) * 0.15;
+                Math.cos(t * 0.7) * b.orbitRadius.z +
+                Math.cos(t * 1.5) * 0.3;
 
-            // Tính hướng di chuyển để đầu bướm hướng về phía trước
             const dx = targetX - b.currentPos.x;
             const dy = targetY - b.currentPos.y;
             const dz = targetZ - b.currentPos.z;
@@ -224,13 +231,12 @@ export class ButterflySystem {
             b.currentPos.set(targetX, targetY, targetZ);
             b.group.position.copy(b.currentPos);
 
-            // Bướm quay mặt theo hướng bay
+            // Quay mặt theo hướng bay
             if (Math.abs(dx) > 0.001 || Math.abs(dz) > 0.001) {
                 const heading = Math.atan2(dx, dz);
                 b.group.rotation.y = heading + Math.PI;
-                // Nghiêng mình (banking) khi lượn cua
-                b.group.rotation.z = -dx * 1.8;
-                b.group.rotation.x = dy * 1.5;
+                b.group.rotation.z = -dx * 1.5;
+                b.group.rotation.x = dy * 1.2;
             }
         });
     }

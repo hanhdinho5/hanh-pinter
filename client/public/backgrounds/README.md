@@ -12,3 +12,4 @@ Dự án hỗ trợ thay đổi cảnh nền livestream linh hoạt (thủ công
 1. Bạn chỉ cần thả các file ảnh `.jpg`, `.jpeg`, `.png`, hoặc `.webp` vào thư mục này.
 2. Đặt tên file ngắn gọn, ví dụ: `my-room.jpg`, `nature-1.jpg`.
 3. Vào trang Admin `/admin` hoặc bảng điều khiển để chọn ảnh vừa thêm, hoặc bật chế độ **Tự động đổi cảnh** để hệ thống tự xoay vòng các ảnh nền!
+
