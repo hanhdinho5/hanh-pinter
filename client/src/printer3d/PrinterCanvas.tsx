@@ -7,6 +7,10 @@ export interface PrinterCanvasHandle {
     printSpecial: (entry: SheetEntry, durationSeconds?: number, onComplete?: () => void) => void;
     ejectSheet: (nextSheet: Sheet, onComplete?: () => void) => void;
     setCameraPreset: (preset: 'stream' | 'closeup' | 'overview') => void;
+    setBackground: (presetId: string) => void;
+    setAutoRotate: (enabled: boolean, intervalMinutes?: number) => void;
+    setCreaturesVisible: (butterflies: boolean, birds: boolean) => void;
+    triggerBirdFlock: () => void;
 }
 
 interface PrinterCanvasProps {
@@ -14,10 +18,28 @@ interface PrinterCanvasProps {
     status: PrinterStatus;
     currentSlot?: number;
     cameraPreset?: 'stream' | 'closeup' | 'overview';
+    backgroundPreset?: string;
+    autoRotate?: boolean;
+    rotateIntervalMinutes?: number;
+    showButterflies?: boolean;
+    showBirds?: boolean;
 }
 
 export const PrinterCanvas = forwardRef<PrinterCanvasHandle, PrinterCanvasProps>(
-    function PrinterCanvas({ sheet, status, currentSlot, cameraPreset = 'stream' }, ref) {
+    function PrinterCanvas(
+        {
+            sheet,
+            status,
+            currentSlot,
+            cameraPreset = 'stream',
+            backgroundPreset,
+            autoRotate,
+            rotateIntervalMinutes,
+            showButterflies = true,
+            showBirds = true,
+        },
+        ref
+    ) {
         const containerRef = useRef<HTMLDivElement>(null);
         const sceneRef = useRef<PrinterWorkshopScene | null>(null);
 
@@ -34,6 +56,18 @@ export const PrinterCanvas = forwardRef<PrinterCanvasHandle, PrinterCanvasProps>
             setCameraPreset(preset) {
                 sceneRef.current?.setCameraPreset(preset);
             },
+            setBackground(presetId) {
+                sceneRef.current?.setBackground(presetId);
+            },
+            setAutoRotate(enabled, intervalMinutes) {
+                sceneRef.current?.setAutoRotate(enabled, intervalMinutes);
+            },
+            setCreaturesVisible(butterflies, birds) {
+                sceneRef.current?.setCreaturesVisible(butterflies, birds);
+            },
+            triggerBirdFlock() {
+                sceneRef.current?.triggerBirdFlock();
+            },
         }));
 
         useEffect(() => {
@@ -44,6 +78,14 @@ export const PrinterCanvas = forwardRef<PrinterCanvasHandle, PrinterCanvasProps>
 
             scene.updateSheet(sheet);
             scene.setPrinterStatus(status, currentSlot);
+
+            if (backgroundPreset) {
+                scene.setBackground(backgroundPreset);
+            }
+            if (autoRotate !== undefined) {
+                scene.setAutoRotate(autoRotate, rotateIntervalMinutes);
+            }
+            scene.setCreaturesVisible(showButterflies, showBirds);
 
             return () => {
                 scene.dispose();
@@ -68,6 +110,24 @@ export const PrinterCanvas = forwardRef<PrinterCanvasHandle, PrinterCanvasProps>
                 sceneRef.current.setCameraPreset(cameraPreset);
             }
         }, [cameraPreset]);
+
+        useEffect(() => {
+            if (sceneRef.current && backgroundPreset) {
+                sceneRef.current.setBackground(backgroundPreset);
+            }
+        }, [backgroundPreset]);
+
+        useEffect(() => {
+            if (sceneRef.current && autoRotate !== undefined) {
+                sceneRef.current.setAutoRotate(autoRotate, rotateIntervalMinutes);
+            }
+        }, [autoRotate, rotateIntervalMinutes]);
+
+        useEffect(() => {
+            if (sceneRef.current) {
+                sceneRef.current.setCreaturesVisible(showButterflies, showBirds);
+            }
+        }, [showButterflies, showBirds]);
 
         return (
             <div

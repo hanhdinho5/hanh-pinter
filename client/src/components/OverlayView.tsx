@@ -44,7 +44,7 @@ export function OverlayView() {
         };
     }, []);
 
-    const { isConnected, currentSheet, status } = usePrinterSocket({
+    const { isConnected, currentSheet, status, backgroundConfig } = usePrinterSocket({
         onJobStarted: (job: PrintJob, durationSeconds: number) => {
             isPrintingRef.current = true;
 
@@ -87,6 +87,13 @@ export function OverlayView() {
                 setActiveSheet(sheet);
             }
         },
+        onBackgroundSync: (config) => {
+            if (printerRef.current) {
+                printerRef.current.setBackground(config.presetId);
+                printerRef.current.setAutoRotate(config.autoRotate, config.intervalMinutes);
+                printerRef.current.setCreaturesVisible(config.showButterflies, config.showBirds);
+            }
+        },
     });
 
     // Đồng bộ ban đầu khi nhận được snapshot từ backend
@@ -114,6 +121,11 @@ export function OverlayView() {
                 status={status}
                 currentSlot={activeSheet.entries.length}
                 cameraPreset="stream"
+                backgroundPreset={backgroundConfig?.presetId ?? 'mountain-mist'}
+                autoRotate={backgroundConfig?.autoRotate ?? false}
+                rotateIntervalMinutes={backgroundConfig?.intervalMinutes ?? 5}
+                showButterflies={backgroundConfig?.showButterflies ?? true}
+                showBirds={backgroundConfig?.showBirds ?? true}
             />
 
             {/* Trạng thái kết nối nhỏ ở góc trên cho streamer kiểm tra */}

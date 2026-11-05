@@ -80,6 +80,14 @@ export interface TikTokStatus {
     reconnectAttempts: number;
 }
 
+export interface BackgroundConfig {
+    presetId: string;
+    autoRotate: boolean;
+    intervalMinutes: number;
+    showButterflies: boolean;
+    showBirds: boolean;
+}
+
 export interface RealtimeEventMap {
     'printer:state': [PrinterState];
     'printer:job:started': [PrintJob];
@@ -90,5 +98,6 @@ export interface RealtimeEventMap {
     queue: [QueueState];
     event: [ViewerEvent];
     'tiktok:status': [TikTokStatus];
+    'background:sync': [BackgroundConfig];
 }
 

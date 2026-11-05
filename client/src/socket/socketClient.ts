@@ -1,5 +1,5 @@
 import { io, type Socket } from 'socket.io-client';
-import type { RealtimeEventMap, ViewerEvent } from '../types';
+import type { RealtimeEventMap, ViewerEvent, BackgroundConfig } from '../types';
 
 export type TypedSocket = Socket<RealtimeEventMap>;
 
@@ -123,6 +123,20 @@ export const api = {
     async getTikTokStatus(serverUrl = DEFAULT_SERVER_URL) {
         const res = await fetch(`${serverUrl}/api/tiktok/status`);
         return res.json();
+    },
+    async getBackgroundConfig(serverUrl = DEFAULT_SERVER_URL) {
+        const res = await fetch(`${serverUrl}/api/config/background`);
+        return res.json() as Promise<BackgroundConfig>;
+    },
+    async setBackgroundConfig(patch: Partial<BackgroundConfig>, serverUrl = DEFAULT_SERVER_URL) {
+        const res = await fetch(`${serverUrl}/api/config/background`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(patch),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error ?? 'Lỗi lưu cấu hình background');
+        return body as BackgroundConfig;
     },
 };
 export type { ViewerEvent };

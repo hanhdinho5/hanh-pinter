@@ -9,3 +9,4 @@ Nếu bạn muốn dùng file âm thanh thực tế của riêng mình, hãy đ�
 3. **`paper-eject.mp3`**: Tiếng cuộn giấy / trượt giấy khi đẩy tờ cũ ra ngoài.
 
 *Hệ thống sẽ tự động ưu tiên phát file của bạn nếu tìm thấy file trong thư mục này.*
+

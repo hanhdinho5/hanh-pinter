@@ -22,3 +22,4 @@ Khi live trên TikTok nhiều giờ, bạn nên dùng nhạc miễn phí bản q
    - Kho nhạc không bản quyền phổ biến nhất trên YouTube/Soundcloud.
 
 *Bạn có thể điều chỉnh âm lượng nhạc nền riêng biệt trên trang `/admin` để nhạc nền êm dịu mà không lấn át giọng nói của bạn!*
+

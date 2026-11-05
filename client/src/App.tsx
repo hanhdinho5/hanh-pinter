@@ -33,7 +33,7 @@ function DashboardView() {
     const isPrintingRef = useRef(false);
 
     // 2. Kết nối Socket.IO thời gian thực với Server (:3001)
-    const { isConnected, currentSheet, queueState, status, setStatus, tiktokStatus } = usePrinterSocket({
+    const { isConnected, currentSheet, queueState, status, setStatus, tiktokStatus, backgroundConfig } = usePrinterSocket({
         onJobStarted: (job: PrintJob, durationSeconds: number) => {
             isPrintingRef.current = true;
 
@@ -72,6 +72,13 @@ function DashboardView() {
         onSheetUpdate: (updatedSheet: Sheet) => {
             if (!isPrintingRef.current) {
                 setSheet(updatedSheet);
+            }
+        },
+        onBackgroundSync: (config) => {
+            if (printerRef.current) {
+                printerRef.current.setBackground(config.presetId);
+                printerRef.current.setAutoRotate(config.autoRotate, config.intervalMinutes);
+                printerRef.current.setCreaturesVisible(config.showButterflies, config.showBirds);
             }
         },
     });
@@ -123,6 +130,11 @@ function DashboardView() {
                     status={status}
                     currentSlot={sheet.entries.length}
                     cameraPreset={cameraPreset}
+                    backgroundPreset={backgroundConfig?.presetId ?? 'mountain-mist'}
+                    autoRotate={backgroundConfig?.autoRotate ?? false}
+                    rotateIntervalMinutes={backgroundConfig?.intervalMinutes ?? 5}
+                    showButterflies={backgroundConfig?.showButterflies ?? true}
+                    showBirds={backgroundConfig?.showBirds ?? true}
                 />
 
                 {/* Badge Overlay góc trên hiển thị trạng thái */}

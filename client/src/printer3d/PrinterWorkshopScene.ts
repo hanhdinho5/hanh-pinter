@@ -12,6 +12,10 @@ import {
 import { SheetCanvasRenderer } from './sheetRenderer';
 import { SparkleParticleSystem } from './particles';
 import { soundManager } from '../audio/SoundManager';
+import { BackgroundManager } from './backgroundManager';
+import { ButterflySystem } from './butterflySystem';
+import { BirdFlockSystem } from './birdFlockSystem';
+import { MistLayerSystem } from './mistLayerSystem';
 import type { Sheet, SheetEntry, PrinterStatus } from '../types';
 
 export class PrinterWorkshopScene {
@@ -27,6 +31,12 @@ export class PrinterWorkshopScene {
     public printHeadLight: THREE.SpotLight;
     public gantryBar: THREE.Group;
     public particles: SparkleParticleSystem;
+
+    // Background & Sinh vật bay tự nhiên
+    public backgroundManager: BackgroundManager;
+    public butterflySystem: ButterflySystem;
+    public birdFlockSystem: BirdFlockSystem;
+    public mistLayerSystem: MistLayerSystem;
 
     // Animation & control
     private animationFrameId: number | null = null;
@@ -87,33 +97,44 @@ export class PrinterWorkshopScene {
         // 4. Ánh sáng ấm cúng & Đèn bàn xưởng
         this.setupLighting();
 
-        // 5. Môi trường (Bàn gỗ, Tường gỗ, Pegboard, Kệ đồ)
+        // 5. Khởi tạo Background & Sinh vật tự nhiên
+        this.backgroundManager = new BackgroundManager();
+        this.mistLayerSystem = new MistLayerSystem();
+        this.birdFlockSystem = new BirdFlockSystem();
+        this.butterflySystem = new ButterflySystem();
+
+        this.scene.add(this.backgroundManager.group);
+        this.scene.add(this.mistLayerSystem.group);
+        this.scene.add(this.birdFlockSystem.group);
+        this.scene.add(this.butterflySystem.group);
+
+        // 6. Môi trường (Bàn gỗ, Tường gỗ, Pegboard, Kệ đồ)
         this.setupEnvironment();
 
-        // 6. Tờ giấy in (Sheet Renderer)
+        // 7. Tờ giấy in (Sheet Renderer)
         this.sheetRenderer = new SheetCanvasRenderer(1024, 1536);
         this.paperMesh = this.createPaperMesh();
         this.scene.add(this.paperMesh);
 
-        // 7. Máy in dạng Plotter CNC mở
+        // 8. Máy in dạng Plotter CNC mở
         const { gantry, printHead, printHeadLight } = this.createPlotterPrinter();
         this.scene.add(gantry);
         this.printHeadGroup = printHead;
         this.printHeadLight = printHeadLight;
         this.gantryBar = gantry;
 
-        // 8. Hệ thống hạt lấp lánh (Sparkle Particle System)
+        // 9. Hệ thống hạt lấp lánh (Sparkle Particle System)
         this.particles = new SparkleParticleSystem(this.scene);
 
-        // 9. Dải huy hiệu hành động nổi
+        // 10. Dải huy hiệu hành động nổi
         const actionBadges = createActionBadgesBar();
         this.scene.add(actionBadges);
 
-        // 10. Resize listener
+        // 11. Resize listener
         this.onWindowResize = this.onWindowResize.bind(this);
         window.addEventListener('resize', this.onWindowResize);
 
-        // 11. Render Loop
+        // 12. Render Loop
         this.startRenderLoop();
     }
 
@@ -180,6 +201,9 @@ export class PrinterWorkshopScene {
 
         const { lampGroup } = createVintageDeskLamp();
         this.scene.add(lampGroup);
+
+        // Đăng ký các đồ vật xưởng mộc để ẩn đi khi chuyển sang phong cảnh ngoài trời
+        this.backgroundManager.registerWorkshopProps([wall, pegboard, shelf, lampGroup]);
     }
 
     private createPlotterPrinter() {
@@ -646,10 +670,16 @@ export class PrinterWorkshopScene {
                 this.updateEjectAnimation(delta);
             }
 
-            // 3. Cập nhật hạt ánh kim / pháo hoa
+            // 3. Cập nhật nền, mây mù, đàn chim và đàn bướm
+            this.backgroundManager.update(delta);
+            this.mistLayerSystem.update(delta);
+            this.birdFlockSystem.update(delta, time);
+            this.butterflySystem.update(delta, time);
+
+            // 4. Cập nhật hạt ánh kim / pháo hoa
             this.particles.update(delta);
 
-            // 4. Camera di chuyển mềm mại
+            // 5. Camera di chuyển mềm mại
             this.camera.position.lerp(this.desiredCamPos, delta * 3.5);
             this.currentTarget.lerp(this.desiredTarget, delta * 3.5);
             this.camera.lookAt(this.currentTarget);
@@ -658,6 +688,23 @@ export class PrinterWorkshopScene {
         };
 
         animate();
+    }
+
+    public setBackground(presetId: string): void {
+        this.backgroundManager.applyPreset(presetId, true);
+    }
+
+    public setAutoRotate(enabled: boolean, intervalMinutes?: number): void {
+        this.backgroundManager.setAutoRotate(enabled, intervalMinutes);
+    }
+
+    public setCreaturesVisible(butterflies: boolean, birds: boolean): void {
+        this.butterflySystem.setVisible(butterflies);
+        this.birdFlockSystem.setVisible(birds);
+    }
+
+    public triggerBirdFlock(): void {
+        this.birdFlockSystem.triggerFlockFlight();
     }
 
     public onWindowResize(): void {
@@ -678,6 +725,10 @@ export class PrinterWorkshopScene {
         }
         window.removeEventListener('resize', this.onWindowResize);
 
+        this.backgroundManager.dispose();
+        this.butterflySystem.dispose();
+        this.birdFlockSystem.dispose();
+        this.mistLayerSystem.dispose();
         this.particles.dispose();
         this.renderer.dispose();
         if (this.renderer.domElement.parentElement) {

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { api } from '../socket/socketClient';
 import { usePrinterSocket } from '../socket/usePrinterSocket';
 import { soundManager } from '../audio/SoundManager';
+import { BACKGROUND_PRESETS } from '../printer3d/backgroundManager';
+import type { BackgroundConfig } from '../types';
 
 const STATUS_LABEL = {
     disconnected: ['Chưa kết nối', '#94a3b8'],
@@ -61,12 +63,43 @@ export function AdminView() {
     const [bgmVol, setBgmVol] = useState(Math.round(soundManager.getBgmVolume() * 100));
     const [sfxVol, setSfxVol] = useState(Math.round(soundManager.getSfxVolume() * 100));
 
+    // Cảnh nền & Sinh vật bay
+    const [bgPreset, setBgPreset] = useState('mountain-mist');
+    const [autoRotate, setAutoRotate] = useState(false);
+    const [rotateInterval, setRotateInterval] = useState(5);
+    const [showButterflies, setShowButterflies] = useState(true);
+    const [showBirds, setShowBirds] = useState(true);
+    const [bgMsg, setBgMsg] = useState('');
+
     useEffect(() => {
         api.getGiftConfig().then((c) => {
             setGold(c.goldDiamonds);
             setFull(c.fullPageDiamonds);
         }).catch(() => undefined);
+
+        api.getBackgroundConfig().then((cfg) => {
+            setBgPreset(cfg.presetId);
+            setAutoRotate(cfg.autoRotate);
+            setRotateInterval(cfg.intervalMinutes);
+            setShowButterflies(cfg.showButterflies);
+            setShowBirds(cfg.showBirds);
+        }).catch(() => undefined);
     }, []);
+
+    const updateBgConfig = async (patch: Partial<BackgroundConfig>) => {
+        try {
+            const res = await api.setBackgroundConfig(patch);
+            setBgPreset(res.presetId);
+            setAutoRotate(res.autoRotate);
+            setRotateInterval(res.intervalMinutes);
+            setShowButterflies(res.showButterflies);
+            setShowBirds(res.showBirds);
+            setBgMsg('Đã lưu & đồng bộ OBS ✔');
+            setTimeout(() => setBgMsg(''), 2500);
+        } catch (err) {
+            setBgMsg(err instanceof Error ? err.message : 'Lỗi');
+        }
+    };
 
     useEffect(() => {
         if (tiktokStatus?.username && !username) setUsername(tiktokStatus.username);
@@ -237,6 +270,91 @@ export function AdminView() {
                     </div>
                     <div style={{ fontSize: 12, color: '#64748b' }}>
                         Thư mục: <code>client/public/music/</code> (lofi-1.mp3, lofi-2.mp3) và <code>client/public/sounds/</code>
+                    </div>
+                </section>
+
+                <section style={card}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h2 style={{ margin: 0, fontSize: 16 }}>Cảnh Nền & Sinh Vật Tự Nhiên</h2>
+                        {bgMsg && <span style={{ fontSize: 13, color: '#10b981' }}>{bgMsg}</span>}
+                    </div>
+
+                    <div style={{ fontSize: 13, color: '#94a3b8' }}>Chọn cảnh nền (áp dụng ngay & đồng bộ OBS):</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 6 }}>
+                        {BACKGROUND_PRESETS.map((p) => {
+                            const active = bgPreset === p.id;
+                            return (
+                                <button
+                                    key={p.id}
+                                    style={{
+                                        ...btn(active ? '#0284c7' : '#1e293b'),
+                                        border: `1px solid ${active ? '#38bdf8' : '#334155'}`,
+                                        padding: '8px 6px',
+                                        fontSize: 12,
+                                        textAlign: 'center',
+                                    }}
+                                    onClick={() => void updateBgConfig({ presetId: p.id })}
+                                >
+                                    {p.badge}
+                                    <div style={{ fontSize: 10, color: active ? '#e0f2fe' : '#94a3b8', marginTop: 2 }}>
+                                        {p.name}
+                                    </div>
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    <div style={{ borderTop: '1px solid #1f2937', paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                            <input
+                                type="checkbox"
+                                checked={autoRotate}
+                                onChange={(e) => void updateBgConfig({ autoRotate: e.target.checked })}
+                            />
+                            <span><b>Tự động đổi cảnh (Auto-Rotate)</b></span>
+                        </label>
+
+                        {autoRotate && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, paddingLeft: 24 }}>
+                                <span>Đổi sau mỗi:</span>
+                                {[1, 3, 5, 10].map((mins) => (
+                                    <button
+                                        key={mins}
+                                        style={{
+                                            ...btn(rotateInterval === mins ? '#0284c7' : '#334155'),
+                                            padding: '4px 8px',
+                                            fontSize: 11,
+                                        }}
+                                        onClick={() => void updateBgConfig({ intervalMinutes: mins })}
+                                    >
+                                        {mins} phút
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    <div style={{ borderTop: '1px solid #1f2937', paddingTop: 8, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                            <input
+                                type="checkbox"
+                                checked={showButterflies}
+                                onChange={(e) => void updateBgConfig({ showButterflies: e.target.checked })}
+                            />
+                            <span>🦋 Đàn bướm 3D</span>
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                            <input
+                                type="checkbox"
+                                checked={showBirds}
+                                onChange={(e) => void updateBgConfig({ showBirds: e.target.checked })}
+                            />
+                            <span>🦅 Đàn chim bay trời xa</span>
+                        </label>
+                    </div>
+
+                    <div style={{ fontSize: 12, color: '#64748b' }}>
+                        Thư mục ảnh: <code>client/public/backgrounds/</code> (có thể thả thêm ảnh vào đây).
                     </div>
                 </section>
 

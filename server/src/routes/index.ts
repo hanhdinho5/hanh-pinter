@@ -2,7 +2,7 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import type { Core } from '../app.js';
 import type { NewEventInput } from '../events/eventHandler.js';
 import { config } from '../config.js';
-import { saveSettings } from '../settings.js';
+import { saveSettings, getBackgroundConfig } from '../settings.js';
 
 class HttpError extends Error {
     constructor(
@@ -140,6 +140,32 @@ export const createRouter = (core: Core): Router => {
         config.gift.fullPageDiamonds = full;
         saveSettings({ goldDiamonds: gold, fullPageDiamonds: full });
         res.json(config.gift);
+    });
+
+    // --- Cấu hình Cảnh Nền Background & Sinh Vật Bay ---
+    router.get('/config/background', (_req, res) => {
+        res.json(getBackgroundConfig());
+    });
+    router.put('/config/background', (req, res) => {
+        if (!isRecord(req.body)) throw new HttpError(400, 'Body phải là JSON object');
+        const current = getBackgroundConfig();
+        const presetId = str(req.body, 'presetId', false) ?? current.presetId;
+        const autoRotate = typeof req.body['autoRotate'] === 'boolean' ? req.body['autoRotate'] : current.autoRotate;
+        const intervalMinutes = int(req.body, 'intervalMinutes') ?? current.intervalMinutes;
+        const showButterflies = typeof req.body['showButterflies'] === 'boolean' ? req.body['showButterflies'] : current.showButterflies;
+        const showBirds = typeof req.body['showBirds'] === 'boolean' ? req.body['showBirds'] : current.showBirds;
+
+        const updated = {
+            presetId,
+            autoRotate,
+            intervalMinutes: Math.max(1, intervalMinutes),
+            showButterflies,
+            showBirds,
+        };
+
+        saveSettings({ background: updated });
+        (core.bus as unknown as NodeJS.EventEmitter).emit('background:sync', updated);
+        res.json(updated);
     });
 
     router.post('/printer/pause', (_req, res) => {

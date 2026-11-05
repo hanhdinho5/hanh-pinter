@@ -7,6 +7,7 @@ import type {
     PrintJob,
     ViewerEvent,
     PrinterStatus,
+    BackgroundConfig,
 } from '../types';
 
 export interface UsePrinterSocketOptions {
@@ -14,6 +15,7 @@ export interface UsePrinterSocketOptions {
     onJobCompleted?: (job: PrintJob) => void;
     onSheetCompleted?: (sheet: Sheet) => void;
     onSheetUpdate?: (sheet: Sheet) => void;
+    onBackgroundSync?: (config: BackgroundConfig) => void;
 }
 
 export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
@@ -24,6 +26,7 @@ export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
     const [status, setStatus] = useState<PrinterStatus>('idle');
     const [recentEvents, setRecentEvents] = useState<ViewerEvent[]>([]);
     const [tiktokStatus, setTiktokStatus] = useState<import('../types').TikTokStatus | null>(null);
+    const [backgroundConfig, setBackgroundConfig] = useState<BackgroundConfig | null>(null);
 
     const optionsRef = useRef(options);
     optionsRef.current = options;
@@ -85,6 +88,11 @@ export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
             setTiktokStatus(status);
         };
 
+        const onBackgroundSync = (config: BackgroundConfig) => {
+            setBackgroundConfig(config);
+            optionsRef.current.onBackgroundSync?.(config);
+        };
+
         socket.on('connect', onConnect);
         socket.on('disconnect', onDisconnect);
         // Cast event handlers through socket's on method
@@ -98,6 +106,7 @@ export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
         rawSocket.on('printer:job:completed', onJobCompleted);
         rawSocket.on('printer:sheet:completed', onSheetCompleted);
         rawSocket.on('tiktok:status', onTikTokStatus);
+        rawSocket.on('background:sync', onBackgroundSync);
 
         if (socket.connected) {
             setIsConnected(true);
@@ -114,6 +123,7 @@ export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
             rawSocket.off('printer:job:completed', onJobCompleted);
             rawSocket.off('printer:sheet:completed', onSheetCompleted);
             rawSocket.off('tiktok:status', onTikTokStatus);
+            rawSocket.off('background:sync', onBackgroundSync);
         };
     }, []);
 
@@ -126,5 +136,6 @@ export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
         setStatus,
         recentEvents,
         tiktokStatus,
+        backgroundConfig,
     };
 }

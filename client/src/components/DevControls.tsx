@@ -3,6 +3,7 @@ import type { Sheet, PrinterStatus, SheetEntry, QueueState, TikTokStatus } from 
 import type { PrinterCanvasHandle } from '../printer3d/PrinterCanvas';
 import { api } from '../socket/socketClient';
 import { soundManager } from '../audio/SoundManager';
+import { BACKGROUND_PRESETS } from '../printer3d/backgroundManager';
 
 interface DevControlsProps {
     sheet: Sheet;
@@ -80,6 +81,40 @@ export function DevControls({
         } else if (type === 'eject') {
             soundManager.playPaperRoll();
         }
+    };
+
+    // Trạng thái Cảnh nền & Sinh vật bay
+    const [currentBg, setCurrentBg] = useState('mountain-mist');
+    const [autoRotate, setAutoRotate] = useState(false);
+    const [showButterflies, setShowButterflies] = useState(true);
+    const [showBirds, setShowBirds] = useState(true);
+
+    const handleSelectBg = (presetId: string) => {
+        setCurrentBg(presetId);
+        printerRef.current?.setBackground(presetId);
+        void api.setBackgroundConfig({ presetId }).catch(() => undefined);
+    };
+
+    const handleToggleAutoRotate = (enabled: boolean) => {
+        setAutoRotate(enabled);
+        printerRef.current?.setAutoRotate(enabled, 5);
+        void api.setBackgroundConfig({ autoRotate: enabled }).catch(() => undefined);
+    };
+
+    const handleToggleButterflies = (enabled: boolean) => {
+        setShowButterflies(enabled);
+        printerRef.current?.setCreaturesVisible(enabled, showBirds);
+        void api.setBackgroundConfig({ showButterflies: enabled }).catch(() => undefined);
+    };
+
+    const handleToggleBirds = (enabled: boolean) => {
+        setShowBirds(enabled);
+        printerRef.current?.setCreaturesVisible(showButterflies, enabled);
+        void api.setBackgroundConfig({ showBirds: enabled }).catch(() => undefined);
+    };
+
+    const handleTriggerBirdFlight = () => {
+        printerRef.current?.triggerBirdFlock();
     };
 
     // Kết nối TikTok LIVE thật
@@ -579,7 +614,76 @@ export function DevControls({
                 </div>
             </div>
 
-            {/* MỤC 4: OBS BROWSER SOURCE OVERLAY */}
+            {/* MỤC 4: CẢNH NỀN & SINH VẬT TỰ NHIÊN */}
+            <div style={{ marginBottom: '16px', background: 'rgba(168, 85, 247, 0.08)', padding: '10px', borderRadius: '8px', border: '1px solid rgba(168, 85, 247, 0.25)' }}>
+                <div style={{ fontWeight: 600, marginBottom: '8px', color: '#c084fc' }}>
+                    🏞️ Cảnh Nền & Sinh Vật Tự Nhiên:
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginBottom: '8px' }}>
+                    {BACKGROUND_PRESETS.map((p) => {
+                        const active = currentBg === p.id;
+                        return (
+                            <button
+                                key={p.id}
+                                onClick={() => handleSelectBg(p.id)}
+                                style={{
+                                    ...btnStyle(active),
+                                    padding: '6px 4px',
+                                    fontSize: '11px',
+                                    background: active ? '#7e22ce' : '#1e293b',
+                                    border: `1px solid ${active ? '#c084fc' : '#334155'}`,
+                                }}
+                            >
+                                {p.badge}
+                            </button>
+                        );
+                    })}
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#cbd5e1', marginBottom: '8px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                        <input
+                            type="checkbox"
+                            checked={autoRotate}
+                            onChange={(e) => handleToggleAutoRotate(e.target.checked)}
+                        />
+                        <span>Tự động đổi cảnh (Auto-Rotate)</span>
+                    </label>
+                    <div style={{ display: 'flex', gap: '12px' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                            <input
+                                type="checkbox"
+                                checked={showButterflies}
+                                onChange={(e) => handleToggleButterflies(e.target.checked)}
+                            />
+                            <span>🦋 Đàn bướm</span>
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                            <input
+                                type="checkbox"
+                                checked={showBirds}
+                                onChange={(e) => handleToggleBirds(e.target.checked)}
+                            />
+                            <span>🦅 Đàn chim</span>
+                        </label>
+                    </div>
+                </div>
+
+                <button
+                    onClick={handleTriggerBirdFlight}
+                    style={{
+                        ...speedBtnStyle,
+                        width: '100%',
+                        padding: '5px',
+                        background: '#334155',
+                        fontSize: '11px',
+                    }}
+                >
+                    🦅 Cho đàn chim bay qua ngay
+                </button>
+            </div>
+
+            {/* MỤC 5: OBS BROWSER SOURCE OVERLAY */}
             <div style={{ marginBottom: '16px', background: 'rgba(16, 185, 129, 0.1)', padding: '10px', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
                 <div style={{ fontWeight: 600, marginBottom: '6px', color: '#10b981' }}>
                     🎥 Nguồn OBS Browser Source (/overlay):

@@ -81,6 +81,14 @@ export interface TikTokStatus {
     reconnectAttempts: number;
 }
 
+export interface BackgroundConfig {
+    presetId: string;
+    autoRotate: boolean;
+    intervalMinutes: number;
+    showButterflies: boolean;
+    showBirds: boolean;
+}
+
 /** Nguồn sự thật duy nhất cho tên + payload của các sự kiện realtime. */
 export interface RealtimeEventMap {
     'printer:state': [PrinterState];
@@ -92,6 +100,7 @@ export interface RealtimeEventMap {
     queue: [QueueState];
     event: [ViewerEvent];
     'tiktok:status': [TikTokStatus];
+    'background:sync': [BackgroundConfig];
 }
 
 export type ServerToClientEvents = {

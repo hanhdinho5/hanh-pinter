@@ -129,3 +129,27 @@ Phần lõi chạy hoàn chỉnh, không phụ thuộc TikTok.
    - **Bộ điều khiển âm lượng UI**:
      - Tích hợp trên cả `/admin` và `DevControls`: Bật/Tắt BGM, Mute/Unmute, thanh trượt âm lượng BGM (0–100%), thanh trượt âm lượng máy in SFX (0–100%), và các nút thử nghiệm âm thanh nhanh.
      - Hỗ trợ tham số URL trên `/overlay`: `?bgm=1`, `?mute=1`, `?sfxVol=0.8`, `?bgmVol=0.4`.
+
+---
+
+### Giai đoạn 8: Cảnh Nền Linh Hoạt (Dynamic Backgrounds) & Sinh Vật Bay Tự Nhiên (Bướm, Chim, Sương Mù) - [HOÀN TẤT]
+1. **Hệ Thống Đổi Cảnh Nền (BackgroundManager)**:
+   - **Mẫu Núi Non Mây Mù (mountain-mist.jpg)**: Trích xuất từ ảnh người dùng, hiển thị thung lũng núi mây sớm mai hùng vĩ vô tận phía sau máy in.
+   - **Thư viện Preset đa dạng**:
+     - mountain-mist: Núi non mây mù bình minh (mẫu chuẩn).
+     - sunset-clouds: Hoàng hôn rực rỡ lãng mạn.
+     - cozy-lofi: Cửa sổ phòng Lofi nhìn ra thành phố đêm.
+     - cyberpunk: Thành phố ánh đèn neon tương lai.
+     - wooden-workshop: Xưởng mộc Livecade gốc ban đầu (tường gỗ, pegboard, đèn bàn).
+   - **Cơ chế chuyển cảnh kép (Dual-Quad Cross-Fade)**: Hai tấm quad lồng nhau mờ dần trong 1.2s, không bị chớp đen hay giật hình.
+   - **Ẩn/Hiện thông minh**: Tự động ẩn tường gỗ trong nhà khi ở chế độ ngoài trời để mở rộng tầm nhìn, bật lại khi chọn Xưởng mộc.
+   - **Tự động đổi cảnh (Auto-Rotate)**: Có toggle bật/tắt và chọn khoảng thời gian xoay vòng (1, 3, 5, 10 phút).
+   - **Thư mục mở rộng**: client/public/backgrounds/ sẵn sàng nhận thêm bất kỳ file ảnh nào từ người dùng.
+2. **Chuyển Động Sinh Vật Tự Nhiên (Ambient Motion)**:
+   - **Đàn bướm 3D dập dờn (ButterflySystem)**: 4 con bướm 3D (xanh ngọc Morpho, vàng hổ phách, ngọc lục bảo, tím hoa cà) vỗ cánh nhịp nhàng theo chu kỳ hình sin $\pm 45^\circ$, lượn lơ lửng mềm mại quanh máy in và bàn làm việc.
+   - **Đàn chim bay qua bầu trời xa (BirdFlockSystem)**: Cứ sau 25-45 giây, một đàn chim 6 con hình chữ V chao liệng bay ngang qua bầu trời xa xăm, vỗ cánh uốn lượn rồi khuất dần. Có nút "Cho chim bay ngay" để thử nghiệm tức thì.
+   - **Lớp sương mù/mây trôi (MistLayerSystem)**: Các dải mây bán trong suốt lững lờ trôi ngang sườn núi tạo chiều sâu thị giác (parallax depth).
+3. **Đồng Bộ Realtime & Giao Diện Admin/OBS**:
+   - REST API: GET/PUT /api/config/background lưu vào settings.json (bền vững qua các lần khởi động).
+   - Socket.IO: Sự kiện ackground:sync phát tức thì tới mọi màn hình OBS /overlay và 3D Scene khi Admin đổi cảnh.
+   - Bảng điều khiển trên cả /admin và DevControls: Gallery thumbnail, toggle Auto-Rotate, công tắc bật/tắt riêng cho Đàn bướm và Đàn chim.
