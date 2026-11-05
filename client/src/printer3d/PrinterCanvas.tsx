@@ -13,7 +13,7 @@ export interface PrinterCanvasHandle {
     applyCustomVideo: (fileOrUrl: File | string) => void;
     applyCustomBackground: (dataUrl: string) => void;
     setAutoRotate: (enabled: boolean, intervalMinutes?: number) => void;
-    setCreaturesVisible: (butterflies: boolean, birds: boolean, leaves?: boolean) => void;
+    setCreaturesVisible: (butterflies: boolean, birds: boolean) => void;
     triggerBirdFlock: () => void;
 }
 
@@ -78,8 +78,8 @@ export const PrinterCanvas = forwardRef<PrinterCanvasHandle, PrinterCanvasProps>
             setAutoRotate(enabled, intervalMinutes) {
                 sceneRef.current?.setAutoRotate(enabled, intervalMinutes);
             },
-            setCreaturesVisible(butterflies, birds, leaves) {
-                sceneRef.current?.setCreaturesVisible(butterflies, birds, leaves);
+            setCreaturesVisible(butterflies, birds) {
+                sceneRef.current?.setCreaturesVisible(butterflies, birds);
             },
             triggerBirdFlock() {
                 sceneRef.current?.triggerBirdFlock();

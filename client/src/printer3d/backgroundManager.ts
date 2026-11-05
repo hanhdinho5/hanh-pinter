@@ -108,6 +108,7 @@ export class BackgroundManager {
 
     private scene: THREE.Scene | null = null;
     private container: HTMLElement | null = null;
+    private renderer: THREE.WebGLRenderer | null = null;
 
     // Tham chiếu tới các đồ vật trong xưởng để ẩn/hiện khi đổi giữa ngoài trời và trong xưởng
     private workshopProps: THREE.Object3D[] = [];
@@ -143,9 +144,10 @@ export class BackgroundManager {
         this.group.add(this.quadB);
     }
 
-    public setSceneAndContainer(scene: THREE.Scene, container: HTMLElement): void {
+    public setSceneAndContainer(scene: THREE.Scene, container: HTMLElement, renderer?: THREE.WebGLRenderer): void {
         this.scene = scene;
         this.container = container;
+        this.renderer = renderer ?? null;
         this.container.style.position = 'relative';
         this.container.style.overflow = 'hidden';
 
@@ -172,7 +174,8 @@ export class BackgroundManager {
         v.setAttribute('loop', '');
         v.setAttribute('autoplay', '');
         v.style.position = 'absolute';
-        v.style.inset = '0';
+        v.style.top = '0';
+        v.style.left = '0';
         v.style.width = '100%';
         v.style.height = '100%';
         v.style.objectFit = 'cover';
@@ -205,8 +208,11 @@ export class BackgroundManager {
             if (this.scene) {
                 this.scene.background = null;
             }
+            if (this.renderer) {
+                this.renderer.setClearColor(0x000000, 0);
+            }
             this.container.style.backgroundImage = 'none';
-            this.container.style.backgroundColor = '#0a0c10';
+            this.container.style.backgroundColor = 'transparent';
         } else {
             if (this.videoElement) {
                 this.videoElement.style.display = 'none';
@@ -409,7 +415,10 @@ export class BackgroundManager {
 
         // 1. Cập nhật nền CSS trên container (hiển thị lập tức, không phụ thuộc WebGL)
         if (this.container) {
-            if (preset.isOutdoor && preset.url) {
+            if (this.mode === 'video') {
+                this.container.style.backgroundImage = 'none';
+                this.container.style.backgroundColor = 'transparent';
+            } else if (preset.isOutdoor && preset.url) {
                 this.container.style.backgroundImage = `url("${preset.url}")`;
                 this.container.style.backgroundSize = 'cover';
                 this.container.style.backgroundPosition = 'center';
@@ -420,11 +429,16 @@ export class BackgroundManager {
             }
         }
 
-        // 2. Cập nhật Three.js scene.background
+        // 2. Cập nhật Three.js scene.background (Chỉ áp dụng khi ở chế độ Image)
         if (this.scene) {
-            if (preset.isOutdoor) {
+            if (this.mode === 'video') {
+                this.scene.background = null;
+                if (this.renderer) {
+                    this.renderer.setClearColor(0x000000, 0);
+                }
+            } else if (preset.isOutdoor) {
                 this.loadPresetTexture(preset, (newTex) => {
-                    if (this.scene && this.currentPresetId === preset.id) {
+                    if (this.scene && this.currentPresetId === preset.id && this.mode === 'image') {
                         this.scene.background = newTex;
                     }
                 });

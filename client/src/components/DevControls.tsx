@@ -90,7 +90,6 @@ export function DevControls({
     const [autoRotate, setAutoRotate] = useState(false);
     const [showButterflies, setShowButterflies] = useState(true);
     const [showBirds, setShowBirds] = useState(true);
-    const [showLeaves, setShowLeaves] = useState(true);
 
     const handleSwitchBgMode = (mode: 'video' | 'image') => {
         setBgMode(mode);
@@ -128,19 +127,14 @@ export function DevControls({
 
     const handleToggleButterflies = (enabled: boolean) => {
         setShowButterflies(enabled);
-        printerRef.current?.setCreaturesVisible(enabled, showBirds, showLeaves);
+        printerRef.current?.setCreaturesVisible(enabled, showBirds);
         void api.setBackgroundConfig({ showButterflies: enabled }).catch(() => undefined);
     };
 
     const handleToggleBirds = (enabled: boolean) => {
         setShowBirds(enabled);
-        printerRef.current?.setCreaturesVisible(showButterflies, enabled, showLeaves);
+        printerRef.current?.setCreaturesVisible(showButterflies, enabled);
         void api.setBackgroundConfig({ showBirds: enabled }).catch(() => undefined);
-    };
-
-    const handleToggleLeaves = (enabled: boolean) => {
-        setShowLeaves(enabled);
-        printerRef.current?.setCreaturesVisible(showButterflies, showBirds, enabled);
     };
 
     const handleTriggerBirdFlight = () => {
@@ -807,16 +801,16 @@ export function DevControls({
                     </div>
                 )}
 
-                {/* Sinh vật tự nhiên: Bướm, Chim, Lá rơi */}
+                {/* Bướm và Chim */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#cbd5e1', marginBottom: '8px' }}>
-                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', gap: '12px' }}>
                         <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
                             <input
                                 type="checkbox"
                                 checked={showButterflies}
                                 onChange={(e) => handleToggleButterflies(e.target.checked)}
                             />
-                            <span>🦋 Bướm</span>
+                            <span>🦋 Đàn bướm</span>
                         </label>
                         <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
                             <input
@@ -824,15 +818,7 @@ export function DevControls({
                                 checked={showBirds}
                                 onChange={(e) => handleToggleBirds(e.target.checked)}
                             />
-                            <span>🦅 Chim</span>
-                        </label>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-                            <input
-                                type="checkbox"
-                                checked={showLeaves}
-                                onChange={(e) => handleToggleLeaves(e.target.checked)}
-                            />
-                            <span>🍃 Lá rơi</span>
+                            <span>🦅 Đàn chim</span>
                         </label>
                     </div>
                 </div>

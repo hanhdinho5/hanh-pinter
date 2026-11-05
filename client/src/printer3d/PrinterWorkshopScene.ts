@@ -8,6 +8,7 @@ import { ButterflySystem } from './butterflySystem';
 import { BirdFlockSystem } from './birdFlockSystem';
 import { MistLayerSystem } from './mistLayerSystem';
 import { FallingLeavesSystem } from './FallingLeavesSystem';
+import { mockPartialSheet } from './mockData';
 import type { Sheet, SheetEntry, PrinterStatus } from '../types';
 
 export class PrinterWorkshopScene {
@@ -64,9 +65,9 @@ export class PrinterWorkshopScene {
     constructor(container: HTMLElement) {
         this.container = container;
 
-        // 1. Scene
+        // 1. Scene trong suốt để nhìn xuyên thấu xuống video nền phía dưới
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x0e0a07);
+        this.scene.background = null;
 
         // 2. Camera chuẩn góc 9:16 (Livecade top-down isometric)
         const aspect = container.clientWidth / container.clientHeight;
@@ -74,18 +75,29 @@ export class PrinterWorkshopScene {
         this.camera.position.copy(this.desiredCamPos);
         this.camera.lookAt(this.desiredTarget);
 
-        // 3. WebGL Renderer
+        // 3. WebGL Renderer trong suốt (alpha: true) đặt ở lớp zIndex: 10 phía trên video nền
         this.renderer = new THREE.WebGLRenderer({
             antialias: true,
             powerPreference: 'high-performance',
             alpha: true,
         });
+        this.renderer.setClearColor(0x000000, 0);
         this.renderer.setSize(container.clientWidth, container.clientHeight);
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFShadowMap;
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.renderer.toneMappingExposure = 1.25;
+
+        // ĐẶT CANVAS Ở LỚP TRÊN CÙNG (z-index: 10), video nền ở lớp dưới (z-index: 0)
+        this.renderer.domElement.style.position = 'absolute';
+        this.renderer.domElement.style.top = '0';
+        this.renderer.domElement.style.left = '0';
+        this.renderer.domElement.style.width = '100%';
+        this.renderer.domElement.style.height = '100%';
+        this.renderer.domElement.style.zIndex = '10';
+        this.renderer.domElement.style.pointerEvents = 'none';
+
         container.appendChild(this.renderer.domElement);
 
         // 4. Ánh sáng ấm cúng & Đèn bàn xưởng
@@ -93,7 +105,7 @@ export class PrinterWorkshopScene {
 
         // 5. Khởi tạo Background & Sinh vật tự nhiên
         this.backgroundManager = new BackgroundManager();
-        this.backgroundManager.setSceneAndContainer(this.scene, container);
+        this.backgroundManager.setSceneAndContainer(this.scene, container, this.renderer);
         this.mistLayerSystem = new MistLayerSystem();
         this.birdFlockSystem = new BirdFlockSystem();
         this.butterflySystem = new ButterflySystem();
@@ -110,6 +122,7 @@ export class PrinterWorkshopScene {
 
         // 7. Tờ giấy in (Sheet Renderer)
         this.sheetRenderer = new SheetCanvasRenderer(1024, 1536);
+        this.sheetRenderer.renderSheet(mockPartialSheet);
         this.paperMesh = this.createPaperMesh();
         this.scene.add(this.paperMesh);
 
