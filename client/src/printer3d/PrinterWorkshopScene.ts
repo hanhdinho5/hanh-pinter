@@ -7,6 +7,7 @@ import { BackgroundManager } from './backgroundManager';
 import { ButterflySystem } from './butterflySystem';
 import { BirdFlockSystem } from './birdFlockSystem';
 import { MistLayerSystem } from './mistLayerSystem';
+import { FallingLeavesSystem } from './FallingLeavesSystem';
 import type { Sheet, SheetEntry, PrinterStatus } from '../types';
 
 export class PrinterWorkshopScene {
@@ -28,6 +29,7 @@ export class PrinterWorkshopScene {
     public butterflySystem: ButterflySystem;
     public birdFlockSystem: BirdFlockSystem;
     public mistLayerSystem: MistLayerSystem;
+    public fallingLeavesSystem: FallingLeavesSystem;
 
     // Animation & control
     private animationFrameId: number | null = null;
@@ -95,11 +97,13 @@ export class PrinterWorkshopScene {
         this.mistLayerSystem = new MistLayerSystem();
         this.birdFlockSystem = new BirdFlockSystem();
         this.butterflySystem = new ButterflySystem();
+        this.fallingLeavesSystem = new FallingLeavesSystem();
 
         this.scene.add(this.backgroundManager.group);
         this.scene.add(this.mistLayerSystem.group);
         this.scene.add(this.birdFlockSystem.group);
         this.scene.add(this.butterflySystem.group);
+        this.scene.add(this.fallingLeavesSystem.group);
 
         // 6. Môi trường (Bàn gỗ, Tường gỗ, Pegboard, Kệ đồ)
         this.setupEnvironment();
@@ -634,11 +638,12 @@ export class PrinterWorkshopScene {
                 this.updateEjectAnimation(delta);
             }
 
-            // 3. Cập nhật nền, mây mù, đàn chim và đàn bướm
+            // 3. Cập nhật nền, mây mù, đàn chim, đàn bướm và lá rơi
             this.backgroundManager.update(delta);
             this.mistLayerSystem.update(delta);
             this.birdFlockSystem.update(delta, time);
             this.butterflySystem.update(delta, time);
+            this.fallingLeavesSystem.update(delta);
 
             // 4. Cập nhật hạt ánh kim / pháo hoa
             this.particles.update(delta);
@@ -682,9 +687,12 @@ export class PrinterWorkshopScene {
         this.backgroundManager.setAutoRotate(enabled, intervalMinutes);
     }
 
-    public setCreaturesVisible(butterflies: boolean, birds: boolean): void {
+    public setCreaturesVisible(butterflies: boolean, birds: boolean, leaves?: boolean): void {
         this.butterflySystem.setVisible(butterflies);
         this.birdFlockSystem.setVisible(birds);
+        if (leaves !== undefined) {
+            this.fallingLeavesSystem.setVisible(leaves);
+        }
     }
 
     public triggerBirdFlock(): void {
@@ -713,6 +721,7 @@ export class PrinterWorkshopScene {
         this.butterflySystem.dispose();
         this.birdFlockSystem.dispose();
         this.mistLayerSystem.dispose();
+        this.fallingLeavesSystem.dispose();
         this.particles.dispose();
         this.renderer.dispose();
         if (this.renderer.domElement.parentElement) {
