@@ -71,16 +71,11 @@ export function OverlayView() {
     return (
         <div
             style={{
-                width: '1080px',
-                height: '1920px',
+                width: '100vw',
+                height: '100vh',
                 position: 'fixed',
                 top: 0,
                 left: 0,
-                transformOrigin: 'top left',
-                transform: `scale(${Math.min(
-                    window.innerWidth / 1080,
-                    window.innerHeight / 1920
-                )})`,
                 overflow: 'hidden',
                 backgroundColor: '#0e0a07',
             }}
