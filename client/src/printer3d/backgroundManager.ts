@@ -47,14 +47,6 @@ export const BACKGROUND_PRESETS: BackgroundPreset[] = [
         ambientColor: 0xf43f5e,
         badge: '⚡ CYBERPUNK',
     },
-    {
-        id: 'wooden-workshop',
-        name: 'Xưởng Mộc Livecade (Gốc)',
-        isOutdoor: false,
-        keyLightColor: 0xfff6e6,
-        ambientColor: 0xfef3c7,
-        badge: '🔨 XƯỞNG MỘC',
-    },
 ];
 
 /**

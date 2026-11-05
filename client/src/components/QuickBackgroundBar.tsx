@@ -232,3 +232,4 @@ export function QuickBackgroundBar({
         </div>
     );
 }
+

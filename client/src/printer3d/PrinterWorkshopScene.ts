@@ -1,14 +1,6 @@
 import * as THREE from 'three';
-import {
-    createWoodTexture,
-    createBrushedMetalTexture,
-} from './textures';
-import {
-    createWallPegboardAndTools,
-    createWorkshopShelf,
-    createVintageDeskLamp,
-    createActionBadgesBar,
-} from './workshopProps';
+import { createBrushedMetalTexture } from './textures';
+import { createActionBadgesBar } from './workshopProps';
 import { SheetCanvasRenderer } from './sheetRenderer';
 import { SparkleParticleSystem } from './particles';
 import { soundManager } from '../audio/SoundManager';
@@ -158,56 +150,8 @@ export class PrinterWorkshopScene {
     }
 
     private setupEnvironment(): void {
-        const tableTex = createWoodTexture(1024, 1024, false);
-        tableTex.map.repeat.set(1.5, 3);
-        tableTex.roughnessMap.repeat.set(1.5, 3);
-
-        const tableGeo = new THREE.BoxGeometry(8, 0.4, 8);
-        const tableMat = new THREE.MeshStandardMaterial({
-            map: tableTex.map,
-            roughnessMap: tableTex.roughnessMap,
-            roughness: 0.5,
-            metalness: 0.05,
-        });
-        const table = new THREE.Mesh(tableGeo, tableMat);
-        table.position.set(0, -0.2, 0.8);
-        table.receiveShadow = true;
-        this.scene.add(table);
-
-        const grooves: THREE.Mesh[] = [];
-        const grooveMat = new THREE.MeshBasicMaterial({ color: 0x140b05 });
-        for (let gz = -2.5; gz <= 4.0; gz += 0.85) {
-            const grooveGeo = new THREE.BoxGeometry(8.02, 0.005, 0.015);
-            const groove = new THREE.Mesh(grooveGeo, grooveMat);
-            groove.position.set(0, 0.003, gz);
-            this.scene.add(groove);
-            grooves.push(groove);
-        }
-
-        const wallTex = createWoodTexture(1024, 1024, true);
-        wallTex.map.repeat.set(2, 1);
-        const wallGeo = new THREE.PlaneGeometry(10, 8);
-        const wallMat = new THREE.MeshStandardMaterial({
-            map: wallTex.map,
-            roughness: 0.85,
-            metalness: 0.02,
-        });
-        const wall = new THREE.Mesh(wallGeo, wallMat);
-        wall.position.set(0, 3.6, -2.5);
-        wall.receiveShadow = true;
-        this.scene.add(wall);
-
-        const pegboard = createWallPegboardAndTools();
-        this.scene.add(pegboard);
-
-        const shelf = createWorkshopShelf();
-        this.scene.add(shelf);
-
-        const { lampGroup } = createVintageDeskLamp();
-        this.scene.add(lampGroup);
-
-        // Đăng ký toàn bộ các đồ vật xưởng mộc (bàn, rãnh xẻ, tường gỗ, kệ, đèn) để ẩn đi khi ở ngoài trời
-        this.backgroundManager.registerWorkshopProps([table, ...grooves, wall, pegboard, shelf, lampGroup]);
+        // Đã loại bỏ hoàn toàn các đồ gỗ xưởng mộc (bàn gỗ, tường gỗ, kệ đồ)
+        // để mở rộng toàn cảnh thiên nhiên / wallpaper phía sau máy in
     }
 
     private createPlotterPrinter() {
