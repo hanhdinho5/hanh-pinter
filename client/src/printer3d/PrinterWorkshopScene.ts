@@ -11,6 +11,7 @@ import {
 } from './workshopProps';
 import { SheetCanvasRenderer } from './sheetRenderer';
 import { SparkleParticleSystem } from './particles';
+import { soundManager } from '../audio/SoundManager';
 import type { Sheet, SheetEntry, PrinterStatus } from '../types';
 
 export class PrinterWorkshopScene {
@@ -182,7 +183,7 @@ export class PrinterWorkshopScene {
     }
 
     private createPlotterPrinter() {
-        const railLength = 3.6;
+        const railLength = 4.2;
         const railGeo = new THREE.CylinderGeometry(0.022, 0.022, railLength, 16);
         const railMat = new THREE.MeshStandardMaterial({
             color: 0xd8e0e8,
@@ -192,20 +193,20 @@ export class PrinterWorkshopScene {
 
         const leftRail = new THREE.Mesh(railGeo, railMat);
         leftRail.rotation.x = Math.PI / 2;
-        leftRail.position.set(-1.16, 0.18, 0.8);
+        leftRail.position.set(-1.16, 0.18, 0.9);
         leftRail.castShadow = true;
         this.scene.add(leftRail);
 
         const rightRail = new THREE.Mesh(railGeo, railMat);
         rightRail.rotation.x = Math.PI / 2;
-        rightRail.position.set(1.16, 0.18, 0.8);
+        rightRail.position.set(1.16, 0.18, 0.9);
         rightRail.castShadow = true;
         this.scene.add(rightRail);
 
         const mountGeo = new THREE.BoxGeometry(0.08, 0.14, 0.08);
         const mountMat = new THREE.MeshStandardMaterial({ color: 0x1f242c, metalness: 0.85 });
         for (const rx of [-1.16, 1.16]) {
-            for (const rz of [-0.95, 2.55]) {
+            for (const rz of [-1.15, 2.95]) {
                 const mount = new THREE.Mesh(mountGeo, mountMat);
                 mount.position.set(rx, 0.07, rz);
                 this.scene.add(mount);
@@ -392,6 +393,9 @@ export class PrinterWorkshopScene {
 
         this.setPrinterStatus('printing');
 
+        // Bật âm thanh máy in (âm motor bước + kim nhiệt)
+        soundManager.startPrintSound(entry.frame === 'gold');
+
         // Cài đặt màu đèn đầu in phù hợp với khung
         if (entry.frame === 'gold') {
             this.printHeadLight.color.setHex(0xfbbf24);
@@ -420,6 +424,8 @@ export class PrinterWorkshopScene {
         this.onPrintCompleteCallback = onComplete ?? null;
 
         this.setPrinterStatus('printing');
+        soundManager.startPrintSound(true);
+
         this.printHeadLight.color.setHex(0xf59e0b);
         this.printHeadLight.intensity = 7.0;
     }
@@ -432,6 +438,9 @@ export class PrinterWorkshopScene {
         this.ejectProgress = 0.0;
         this.nextSheetData = nextSheet;
         this.onEjectCompleteCallback = onComplete ?? null;
+
+        // Âm thanh cuộn giấy xoẹt qua
+        soundManager.playPaperRoll();
     }
 
     /**
@@ -441,11 +450,56 @@ export class PrinterWorkshopScene {
         const col = slotIdx % 2;
         const row = Math.floor(slotIdx / 2);
 
-        const x = col === 0 ? -0.52 : 0.52;
-        const z = -0.1 + row * 0.95;
+        const x = col === 0 ? -0.488 : 0.488;
+        const rowCentersZ = [-0.054, 0.939, 1.931];
+        const z = rowCentersZ[Math.min(row, 2)];
         const y = 0.04;
 
         return new THREE.Vector3(x, y, z);
+    }
+
+    /**
+     * Tính toán toạ độ mục tiêu chuẩn xác cho Thanh in (Gantry Z) và Đầu in (Printhead X)
+     * tương ứng đúng vị trí hình ảnh và tiến độ quét dòng trên tờ giấy.
+     */
+    private getSlotPrintheadTargets(
+        slotIdx: number,
+        progress: number,
+        isSpecial: boolean
+    ): { gantryZ: number; centerX: number; halfWidth: number } {
+        const paperLen = 3.4;
+        const paperZ0 = -0.85; // Mép trên của giấy bắt đầu tại Z = -0.85
+        const headZOffset = 0.08; // Nozzle lệch so với tâm thanh dầm
+
+        if (isSpecial) {
+            const yStart = 160;
+            const yEnd = 1456;
+            const y = yStart + progress * (yEnd - yStart);
+            const paperZ = paperZ0 + (y / 1536) * paperLen;
+            return {
+                gantryZ: paperZ - headZOffset,
+                centerX: 0,
+                halfWidth: 0.78,
+            };
+        }
+
+        const row = Math.floor(slotIdx / 2);
+        const col = slotIdx % 2;
+
+        const rowYStarts = [150, 598.67, 1047.33];
+        const rowHeight = 418.67;
+
+        const yStart = rowYStarts[Math.min(row, 2)];
+        const yEnd = yStart + rowHeight;
+        const y = yStart + progress * (yEnd - yStart);
+        const paperZ = paperZ0 + (y / 1536) * paperLen;
+
+        const centerX = col === 0 ? -0.488 : 0.488;
+        return {
+            gantryZ: paperZ - headZOffset,
+            centerX,
+            halfWidth: 0.38,
+        };
     }
 
     /**
@@ -473,32 +527,35 @@ export class PrinterWorkshopScene {
             this.gleamProgress
         );
 
-        // Chuyển động đầu in: Di chuyển ngang zigzag qua lại vùng ô đang in
         const isSpecial = this.currentSheet.kind === 'special';
-        let targetCenterX = 0;
-        let sweepWidth = 0.42;
+        const targets = this.getSlotPrintheadTargets(this.activeSlot, this.printProgress, isSpecial);
 
-        if (isSpecial) {
-            targetCenterX = 0;
-            sweepWidth = 0.82;
-        } else {
-            const col = this.activeSlot % 2;
-            targetCenterX = col === 0 ? -0.52 : 0.52;
-        }
+        // 1. Chuyển động thanh dầm (Gantry) di chuyển dọc thanh ray trục Z tới đúng hàng đang in
+        // và bám sát từng dòng vẽ từ trên xuống dưới
+        this.gantryBar.position.z = THREE.MathUtils.lerp(
+            this.gantryBar.position.z,
+            targets.gantryZ,
+            Math.min(1.0, delta * 14)
+        );
 
-        // Tần số quét cao mô phỏng đầu kim in ngang
-        const scanOscillation = Math.sin(time * 18) * sweepWidth;
-        this.printHeadGroup.position.x = targetCenterX + scanOscillation;
+        // 2. Chuyển động đầu in (Printhead) quét ngang trục X qua lại đúng khung ô avatar như cây bút đang vẽ
+        const scanOscillation = Math.sin(time * 26) * targets.halfWidth;
+        this.printHeadGroup.position.x = targets.centerX + scanOscillation;
 
         // Khi in hoàn thành 100%
         if (this.printProgress >= 1.0) {
             this.isPrintingActive = false;
             this.setPrinterStatus('idle');
 
-            // Bùng nổ hạt lấp lánh nếu là khung vàng hoặc trang đặc biệt
+            // Tắt tiếng máy in
+            soundManager.stopPrintSound();
+
+            // Phát tiếng chuông vàng và bùng nổ hạt lấp lánh nếu là khung vàng hoặc trang đặc biệt
             if (isSpecial) {
+                soundManager.playGoldChime();
                 this.particles.burstGrandCelebration(new THREE.Vector3(0, 0.05, 0.8));
             } else if (this.activeEntry.frame === 'gold') {
+                soundManager.playGoldChime();
                 const burstPos = this.getSlotWorldPosition(this.activeSlot);
                 this.particles.burstGoldSparkles(burstPos, 50);
             }
@@ -571,11 +628,16 @@ export class PrinterWorkshopScene {
             if (this.isPrintingActive) {
                 this.updatePrintAnimation(delta, time);
             } else if (!this.isEjecting) {
-                // Khi nghỉ, đầu in nhẹ nhàng lướt về tâm máy
+                // Khi nghỉ, đầu in nhẹ nhàng lướt về tâm máy và thanh dầm lùi về vị trí chờ (Home)
                 this.printHeadGroup.position.x = THREE.MathUtils.lerp(
                     this.printHeadGroup.position.x,
                     0,
                     delta * 4
+                );
+                this.gantryBar.position.z = THREE.MathUtils.lerp(
+                    this.gantryBar.position.z,
+                    -0.65,
+                    delta * 3.5
                 );
             }
 
@@ -610,6 +672,7 @@ export class PrinterWorkshopScene {
     }
 
     public dispose(): void {
+        soundManager.stopPrintSound();
         if (this.animationFrameId !== null) {
             cancelAnimationFrame(this.animationFrameId);
         }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { PrinterCanvas, type PrinterCanvasHandle } from '../printer3d/PrinterCanvas';
 import { usePrinterSocket } from '../socket/usePrinterSocket';
+import { soundManager } from '../audio/SoundManager';
 import type { Sheet, SheetEntry, PrintJob } from '../types';
 
 export function OverlayView() {
@@ -15,6 +16,33 @@ export function OverlayView() {
     });
 
     const isPrintingRef = useRef(false);
+
+    // Xử lý tham số URL: ?bgm=1 (tự bật BGM), ?mute=1 (tắt âm), ?vol=50
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('mute') === '1' || params.get('muted') === '1') {
+            soundManager.toggleMute();
+        }
+        if (params.has('sfxVol')) {
+            soundManager.setSfxVolume(Number(params.get('sfxVol')));
+        }
+        if (params.has('bgmVol')) {
+            soundManager.setBgmVolume(Number(params.get('bgmVol')));
+        }
+        if (params.get('bgm') === '1') {
+            soundManager.startBgm();
+        }
+
+        const handleInteraction = () => {
+            soundManager.unlockAudio();
+        };
+        window.addEventListener('click', handleInteraction, { once: true });
+        window.addEventListener('keydown', handleInteraction, { once: true });
+        return () => {
+            window.removeEventListener('click', handleInteraction);
+            window.removeEventListener('keydown', handleInteraction);
+        };
+    }, []);
 
     const { isConnected, currentSheet, status } = usePrinterSocket({
         onJobStarted: (job: PrintJob, durationSeconds: number) => {

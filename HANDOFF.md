@@ -109,3 +109,23 @@ Phần lõi chạy hoàn chỉnh, không phụ thuộc TikTok.
 - Thử khi chưa live: `/admin` có nút "Giả lập TikTok" (POST `/api/dev/tiktok/simulate`) đi qua đúng adapter thật, gồm combo quà.
 - OBS: Browser Source `http://localhost:5173/overlay`, 1080x1920.
 - Còn lại: chạy thử trên livestream TikTok thật (reconnect, avatar, quà combo chưa kiểm chứng ngoài đời).
+
+---
+
+### Giai đoạn 7: Đồng bộ Chuyển động Thanh In 2 Trục (Pen-Plotter Gantry Motion) & Hệ Thống Âm Thanh (SFX / BGM) - [HOÀN TẤT]
+1. **Chuyển động Thanh in & Đầu in (CNC Plotter / Pen Motion)**:
+   - **Ray trượt kim loại trục Z**: Mở rộng chiều dài ray lên `4.2` (từ $Z = -1.2$ tới $Z = +3.0$, đế kẹp tại $-1.15$ và $+2.95$), đảm bảo thanh dầm di chuyển trơn tru trên toàn bộ chiều dài tờ giấy mà không bị tuột khỏi ray.
+   - **Thanh in (Gantry Bar) di chuyển trục Z**: Tính toán ánh xạ toạ độ chính xác $Z_{\text{paper}}(y) = -0.85 + (y / 1536) \times 3.4$. Thanh dầm trượt tới đúng hàng đang in (Row 0, 1, 2 hoặc trang đặc biệt) và tịnh tiến từ trên xuống dưới bám sát từng scanline đang vẽ. Khi nghỉ hoặc đẩy giấy, dầm lùi về vị trí chờ ($Z = -0.65$).
+   - **Đầu in (Printhead) di chuyển trục X**: Quét ngang zigzag qua lại đúng chiều rộng của ô slot (cột 0, cột 1 hoặc toàn khổ giấy trang đặc biệt) như một cây bút vẽ đang tô hình ảnh.
+   - **Đèn LED & Spotlight đầu in**: Chiếu rọi trực tiếp vào scanline đang vẽ trên bề mặt giấy với hiệu ứng ánh sáng đồng bộ.
+2. **Hệ thống âm thanh sống động (Audio System)**:
+   - **Web Audio API Synth**: Tự tổng hợp âm thanh chân thực không phụ thuộc tải file:
+     - Tiếng máy in (SFX): Tiếng motor bước (stepper motor 110Hz + 220Hz) phối hợp với tiếng dither nhiệt (white noise filter) êm dịu, không gây ồn. Tự động bật khi in và tắt êm khi in xong.
+     - Tiếng chuông vàng VIP: Hòa âm chuông ngũ cung (pentatonic chimes) vang lên khi in xong khung vàng hoặc trang đặc biệt.
+     - Tiếng cuộn giấy: Hiệu ứng gió rít cuốn giấy trượt vút khỏi bàn in.
+   - **Hỗ trợ nạp file âm thanh ngoài**:
+     - Thư mục `client/public/sounds/`: hỗ trợ file ghi âm thật (`printer-working.mp3`, `gold-chime.mp3`, `paper-eject.mp3`).
+     - Thư mục `client/public/music/`: hỗ trợ các bản nhạc lofi không bản quyền (`lofi-1.mp3`, `lofi-2.mp3`, `bgm.mp3`), tự động phát lặp và chuyển bài.
+   - **Bộ điều khiển âm lượng UI**:
+     - Tích hợp trên cả `/admin` và `DevControls`: Bật/Tắt BGM, Mute/Unmute, thanh trượt âm lượng BGM (0–100%), thanh trượt âm lượng máy in SFX (0–100%), và các nút thử nghiệm âm thanh nhanh.
+     - Hỗ trợ tham số URL trên `/overlay`: `?bgm=1`, `?mute=1`, `?sfxVol=0.8`, `?bgmVol=0.4`.

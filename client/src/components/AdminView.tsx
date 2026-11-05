@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../socket/socketClient';
 import { usePrinterSocket } from '../socket/usePrinterSocket';
+import { soundManager } from '../audio/SoundManager';
 
 const STATUS_LABEL = {
     disconnected: ['Chưa kết nối', '#94a3b8'],
@@ -54,6 +55,11 @@ export function AdminView() {
     const [full, setFull] = useState(1000);
     const [giftMsg, setGiftMsg] = useState('');
     const [speed, setSpeed] = useState(1);
+
+    const [bgmPlaying, setBgmPlaying] = useState(soundManager.getBgmPlaying());
+    const [muted, setMuted] = useState(soundManager.isSoundMuted());
+    const [bgmVol, setBgmVol] = useState(Math.round(soundManager.getBgmVolume() * 100));
+    const [sfxVol, setSfxVol] = useState(Math.round(soundManager.getSfxVolume() * 100));
 
     useEffect(() => {
         api.getGiftConfig().then((c) => {
@@ -141,6 +147,97 @@ export function AdminView() {
                         <span style={{ fontSize: 13, color: '#94a3b8' }}>{giftMsg}</span>
                     </div>
                     <div style={{ fontSize: 12, color: '#64748b' }}>Tính theo tổng = kim cương × số lượng quà. Áp dụng ngay, được lưu lại.</div>
+                </section>
+
+                <section style={card}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h2 style={{ margin: 0, fontSize: 16 }}>Âm thanh & Nhạc nền (BGM)</h2>
+                        <button
+                            style={btn(muted ? '#ef4444' : '#1e293b')}
+                            onClick={() => setMuted(soundManager.toggleMute())}
+                        >
+                            {muted ? '🔇 Đang tắt âm' : '🔊 Đang mở âm'}
+                        </button>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                            style={btn(bgmPlaying ? '#0284c7' : '#334155')}
+                            onClick={() => {
+                                if (bgmPlaying) {
+                                    soundManager.stopBgm();
+                                    setBgmPlaying(false);
+                                } else {
+                                    soundManager.startBgm();
+                                    setBgmPlaying(true);
+                                }
+                            }}
+                        >
+                            {bgmPlaying ? '⏸ Tạm dừng BGM' : '▶ Bật Nhạc BGM'}
+                        </button>
+                    </div>
+                    <label style={{ fontSize: 13 }}>
+                        Âm lượng BGM: <b>{bgmVol}%</b>
+                        <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            value={bgmVol}
+                            style={{ width: '100%', accentColor: '#38bdf8' }}
+                            onChange={(e) => {
+                                const v = Number(e.target.value);
+                                setBgmVol(v);
+                                soundManager.setBgmVolume(v / 100);
+                            }}
+                        />
+                    </label>
+                    <label style={{ fontSize: 13 }}>
+                        Âm lượng Máy in (SFX): <b>{sfxVol}%</b>
+                        <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            value={sfxVol}
+                            style={{ width: '100%', accentColor: '#fbbf24' }}
+                            onChange={(e) => {
+                                const v = Number(e.target.value);
+                                setSfxVol(v);
+                                soundManager.setSfxVolume(v / 100);
+                            }}
+                        />
+                    </label>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        <button
+                            style={btn('#475569')}
+                            onClick={() => {
+                                soundManager.unlockAudio();
+                                soundManager.startPrintSound(false);
+                                setTimeout(() => soundManager.stopPrintSound(), 1800);
+                            }}
+                        >
+                            🔊 Thử máy in
+                        </button>
+                        <button
+                            style={btn('#475569')}
+                            onClick={() => {
+                                soundManager.unlockAudio();
+                                soundManager.playGoldChime();
+                            }}
+                        >
+                            ✨ Thử chuông VIP
+                        </button>
+                        <button
+                            style={btn('#475569')}
+                            onClick={() => {
+                                soundManager.unlockAudio();
+                                soundManager.playPaperRoll();
+                            }}
+                        >
+                            📄 Thử cuộn giấy
+                        </button>
+                    </div>
+                    <div style={{ fontSize: 12, color: '#64748b' }}>
+                        Thư mục: <code>client/public/music/</code> (lofi-1.mp3, lofi-2.mp3) và <code>client/public/sounds/</code>
+                    </div>
                 </section>
 
                 <section style={card}>

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Sheet, PrinterStatus, SheetEntry, QueueState, TikTokStatus } from '../types';
 import type { PrinterCanvasHandle } from '../printer3d/PrinterCanvas';
 import { api } from '../socket/socketClient';
+import { soundManager } from '../audio/SoundManager';
 
 interface DevControlsProps {
     sheet: Sheet;
@@ -37,6 +38,49 @@ export function DevControls({
     const [copySuccess, setCopySuccess] = useState(false);
     const [tiktokInput, setTiktokInput] = useState('');
     const [isConnectingTikTok, setIsConnectingTikTok] = useState(false);
+
+    // Trạng thái Âm thanh & Nhạc nền
+    const [bgmPlaying, setBgmPlaying] = useState(soundManager.getBgmPlaying());
+    const [isMuted, setIsMuted] = useState(soundManager.isSoundMuted());
+    const [bgmVol, setBgmVol] = useState(Math.round(soundManager.getBgmVolume() * 100));
+    const [sfxVol, setSfxVol] = useState(Math.round(soundManager.getSfxVolume() * 100));
+
+    const handleToggleBgm = () => {
+        if (bgmPlaying) {
+            soundManager.stopBgm();
+            setBgmPlaying(false);
+        } else {
+            soundManager.startBgm();
+            setBgmPlaying(true);
+        }
+    };
+
+    const handleToggleMute = () => {
+        const muted = soundManager.toggleMute();
+        setIsMuted(muted);
+    };
+
+    const handleChangeBgmVol = (val: number) => {
+        setBgmVol(val);
+        soundManager.setBgmVolume(val / 100);
+    };
+
+    const handleChangeSfxVol = (val: number) => {
+        setSfxVol(val);
+        soundManager.setSfxVolume(val / 100);
+    };
+
+    const handleTestSfx = (type: 'printer' | 'gold' | 'eject') => {
+        soundManager.unlockAudio();
+        if (type === 'printer') {
+            soundManager.startPrintSound(false);
+            setTimeout(() => soundManager.stopPrintSound(), 1800);
+        } else if (type === 'gold') {
+            soundManager.playGoldChime();
+        } else if (type === 'eject') {
+            soundManager.playPaperRoll();
+        }
+    };
 
     // Kết nối TikTok LIVE thật
     const handleConnectTikTok = async () => {
@@ -443,7 +487,99 @@ export function DevControls({
                 </div>
             </div>
 
-            {/* MỤC 3: OBS BROWSER SOURCE OVERLAY */}
+            {/* MỤC 3: ÂM THANH & NHẠC NỀN */}
+            <div style={{ marginBottom: '16px', background: 'rgba(56, 189, 248, 0.08)', padding: '10px', borderRadius: '8px', border: '1px solid rgba(56, 189, 248, 0.25)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ fontWeight: 600, color: '#38bdf8' }}>🎵 Âm Thanh & Nhạc Nền:</span>
+                    <button
+                        onClick={handleToggleMute}
+                        style={{
+                            background: isMuted ? '#ef4444' : '#1e293b',
+                            color: '#ffffff',
+                            border: '1px solid #475569',
+                            borderRadius: '4px',
+                            padding: '2px 8px',
+                            fontSize: '11px',
+                            cursor: 'pointer',
+                        }}
+                    >
+                        {isMuted ? '🔇 Đang Tắt Âm' : '🔊 Đang Mở Âm'}
+                    </button>
+                </div>
+
+                {/* BGM Toggle & Playlist */}
+                <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+                    <button
+                        onClick={handleToggleBgm}
+                        style={{
+                            ...actionBtnStyle(bgmPlaying ? '#0284c7' : '#334155', bgmPlaying ? '#0369a1' : '#475569'),
+                            flex: 1,
+                        }}
+                    >
+                        {bgmPlaying ? '⏸ Tạm dừng BGM' : '▶ Bật Nhạc BGM'}
+                    </button>
+                </div>
+
+                {/* Thanh trượt âm lượng */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '8px', fontSize: '11px' }}>
+                    <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8', marginBottom: '2px' }}>
+                            <span>Âm lượng Nhạc BGM:</span>
+                            <span>{bgmVol}%</span>
+                        </div>
+                        <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={bgmVol}
+                            onChange={(e) => handleChangeBgmVol(Number(e.target.value))}
+                            style={{ width: '100%', accentColor: '#38bdf8' }}
+                        />
+                    </div>
+                    <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8', marginBottom: '2px' }}>
+                            <span>Âm lượng Máy In (SFX):</span>
+                            <span>{sfxVol}%</span>
+                        </div>
+                        <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={sfxVol}
+                            onChange={(e) => handleChangeSfxVol(Number(e.target.value))}
+                            style={{ width: '100%', accentColor: '#fbbf24' }}
+                        />
+                    </div>
+                </div>
+
+                {/* Thử nhanh hiệu ứng âm thanh */}
+                <div style={{ display: 'flex', gap: '4px', marginBottom: '6px' }}>
+                    <button
+                        onClick={() => handleTestSfx('printer')}
+                        style={{ ...speedBtnStyle, fontSize: '10px' }}
+                    >
+                        🔊 Thử Máy In
+                    </button>
+                    <button
+                        onClick={() => handleTestSfx('gold')}
+                        style={{ ...speedBtnStyle, fontSize: '10px' }}
+                    >
+                        ✨ Thử Chuông VIP
+                    </button>
+                    <button
+                        onClick={() => handleTestSfx('eject')}
+                        style={{ ...speedBtnStyle, fontSize: '10px' }}
+                    >
+                        📄 Thử Cuộn Giấy
+                    </button>
+                </div>
+
+                <div style={{ fontSize: '10px', color: '#64748b' }}>
+                    📁 Nhạc: <code>client/public/music/</code> · SFX: <code>client/public/sounds/</code>
+                </div>
+            </div>
+
+            {/* MỤC 4: OBS BROWSER SOURCE OVERLAY */}
             <div style={{ marginBottom: '16px', background: 'rgba(16, 185, 129, 0.1)', padding: '10px', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
                 <div style={{ fontWeight: 600, marginBottom: '6px', color: '#10b981' }}>
                     🎥 Nguồn OBS Browser Source (/overlay):
