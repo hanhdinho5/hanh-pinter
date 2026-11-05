@@ -18,6 +18,8 @@ export function OverlayView() {
     });
 
     const isPrintingRef = useRef(false);
+    const [bgMode, setBgMode] = useState<'image' | 'video'>('video');
+    const [currentVideoId, setCurrentVideoId] = useState('vd1');
 
     // Xử lý tham số URL: ?bgm=1 (tự bật BGM), ?mute=1 (tắt âm), ?vol=50
     useEffect(() => {
@@ -130,15 +132,33 @@ export function OverlayView() {
                 showBirds={backgroundConfig?.showBirds ?? true}
             />
 
-            {/* Thanh điều khiển chọn Background nhanh (luôn có sẵn để đổi ảnh) */}
+            {/* Thanh điều khiển chọn Background nhanh (luôn có sẵn để đổi video / ảnh) */}
             <QuickBackgroundBar
                 currentPresetId={backgroundConfig?.presetId ?? 'mountain-mist'}
+                bgMode={bgMode}
+                onToggleBgMode={(mode) => {
+                    setBgMode(mode);
+                    printerRef.current?.setBackgroundMode(mode);
+                }}
+                currentVideoId={currentVideoId}
+                onSelectVideo={(videoId) => {
+                    setCurrentVideoId(videoId);
+                    printerRef.current?.setBackgroundVideo(videoId);
+                    printerRef.current?.setBackgroundMode('video');
+                }}
+                onUploadCustomVideo={(file) => {
+                    printerRef.current?.applyCustomVideo(file);
+                }}
                 onSelectPreset={(presetId) => {
                     printerRef.current?.setBackground(presetId);
+                    printerRef.current?.setBackgroundMode('image');
+                    setBgMode('image');
                     void api.setBackgroundConfig({ presetId });
                 }}
                 onUploadCustomImage={(dataUrl) => {
                     printerRef.current?.applyCustomBackground(dataUrl);
+                    printerRef.current?.setBackgroundMode('image');
+                    setBgMode('image');
                 }}
                 autoRotate={backgroundConfig?.autoRotate ?? false}
                 onToggleAutoRotate={(enabled) => {

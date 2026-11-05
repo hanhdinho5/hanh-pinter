@@ -10,6 +10,34 @@ export interface BackgroundPreset {
     badge: string;
 }
 
+export interface VideoPreset {
+    id: string;
+    name: string;
+    url: string;
+    badge: string;
+}
+
+export const VIDEO_PRESETS: VideoPreset[] = [
+    {
+        id: 'vd1',
+        name: 'Video Cảnh 1 (vd1.mp4)',
+        url: '/backgrounds/vd1.mp4',
+        badge: '🎬 VIDEO 1 (VD1)',
+    },
+    {
+        id: 'vd2',
+        name: 'Video Cảnh 2 (vd2.mp4)',
+        url: '/backgrounds/vd2.mp4',
+        badge: '🎬 VIDEO 2',
+    },
+    {
+        id: 'vd3',
+        name: 'Video Cảnh 3 (vd3.mp4)',
+        url: '/backgrounds/vd3.mp4',
+        badge: '🎬 VIDEO 3',
+    },
+];
+
 export const BACKGROUND_PRESETS: BackgroundPreset[] = [
     {
         id: 'mountain-mist',
@@ -72,6 +100,12 @@ export class BackgroundManager {
     private rotateIntervalSeconds = 300; // Mặc định 5 phút
     private autoRotateTimer = 0.0;
 
+    // Chế độ nền: 'video' (ưu tiên phát video AI vd1.mp4) hoặc 'image' (ảnh tĩnh)
+    private mode: 'image' | 'video' = 'video';
+    private currentVideoId = 'vd1';
+    private videoElement: HTMLVideoElement | null = null;
+    private autoNextVideo = false;
+
     private scene: THREE.Scene | null = null;
     private container: HTMLElement | null = null;
 
@@ -112,7 +146,127 @@ export class BackgroundManager {
     public setSceneAndContainer(scene: THREE.Scene, container: HTMLElement): void {
         this.scene = scene;
         this.container = container;
-        this.applyPreset(this.currentPresetId, false);
+        this.container.style.position = 'relative';
+        this.container.style.overflow = 'hidden';
+
+        this.initVideoElement();
+
+        if (this.mode === 'video') {
+            this.setMode('video');
+        } else {
+            this.applyPreset(this.currentPresetId, false);
+        }
+    }
+
+    private initVideoElement(): void {
+        if (!this.container || this.videoElement) return;
+
+        const v = document.createElement('video');
+        v.autoplay = true;
+        v.loop = true;
+        v.muted = true;
+        v.playsInline = true;
+        v.setAttribute('playsinline', '');
+        v.setAttribute('webkit-playsinline', '');
+        v.setAttribute('muted', '');
+        v.setAttribute('loop', '');
+        v.setAttribute('autoplay', '');
+        v.style.position = 'absolute';
+        v.style.inset = '0';
+        v.style.width = '100%';
+        v.style.height = '100%';
+        v.style.objectFit = 'cover';
+        v.style.pointerEvents = 'none';
+        v.style.zIndex = '0';
+        v.style.display = this.mode === 'video' ? 'block' : 'none';
+
+        v.addEventListener('ended', () => {
+            if (this.autoNextVideo) {
+                this.playNextVideo();
+            }
+        });
+
+        this.videoElement = v;
+        this.container.insertBefore(v, this.container.firstChild);
+
+        // Nạp video vd1.mp4 của người dùng
+        this.applyVideo(this.currentVideoId);
+    }
+
+    public setMode(mode: 'image' | 'video'): void {
+        this.mode = mode;
+        if (!this.container) return;
+
+        if (mode === 'video') {
+            if (this.videoElement) {
+                this.videoElement.style.display = 'block';
+                this.videoElement.play().catch(() => undefined);
+            }
+            if (this.scene) {
+                this.scene.background = null;
+            }
+            this.container.style.backgroundImage = 'none';
+            this.container.style.backgroundColor = '#0a0c10';
+        } else {
+            if (this.videoElement) {
+                this.videoElement.style.display = 'none';
+                this.videoElement.pause();
+            }
+            this.applyPreset(this.currentPresetId, false);
+        }
+    }
+
+    public getMode(): 'image' | 'video' {
+        return this.mode;
+    }
+
+    public applyVideo(videoId: string): void {
+        this.currentVideoId = videoId;
+        const preset = VIDEO_PRESETS.find((v) => v.id === videoId);
+        const url = preset?.url ?? '/backgrounds/vd1.mp4';
+
+        if (this.videoElement) {
+            this.videoElement.src = url;
+            this.videoElement.loop = !this.autoNextVideo;
+            if (this.mode === 'video') {
+                this.videoElement.play().catch(() => undefined);
+            }
+        }
+    }
+
+    public getCurrentVideoId(): string {
+        return this.currentVideoId;
+    }
+
+    public setAutoNextVideo(enabled: boolean): void {
+        this.autoNextVideo = enabled;
+        if (this.videoElement) {
+            this.videoElement.loop = !enabled;
+        }
+    }
+
+    public getAutoNextVideo(): boolean {
+        return this.autoNextVideo;
+    }
+
+    public playNextVideo(): void {
+        const idx = VIDEO_PRESETS.findIndex((v) => v.id === this.currentVideoId);
+        const nextIdx = (idx + 1) % VIDEO_PRESETS.length;
+        this.applyVideo(VIDEO_PRESETS[nextIdx].id);
+    }
+
+    public setCustomVideo(fileOrUrl: File | string): void {
+        let url: string;
+        if (typeof fileOrUrl === 'string') {
+            url = fileOrUrl;
+        } else {
+            url = URL.createObjectURL(fileOrUrl);
+        }
+        if (this.videoElement) {
+            this.videoElement.src = url;
+            this.setMode('video');
+            this.videoElement.play().catch(() => undefined);
+        }
     }
 
     /**

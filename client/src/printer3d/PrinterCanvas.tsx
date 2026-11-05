@@ -8,6 +8,9 @@ export interface PrinterCanvasHandle {
     ejectSheet: (nextSheet: Sheet, onComplete?: () => void) => void;
     setCameraPreset: (preset: 'stream' | 'closeup' | 'overview') => void;
     setBackground: (presetId: string) => void;
+    setBackgroundMode: (mode: 'image' | 'video') => void;
+    setBackgroundVideo: (videoId: string) => void;
+    applyCustomVideo: (fileOrUrl: File | string) => void;
     applyCustomBackground: (dataUrl: string) => void;
     setAutoRotate: (enabled: boolean, intervalMinutes?: number) => void;
     setCreaturesVisible: (butterflies: boolean, birds: boolean) => void;
@@ -59,6 +62,15 @@ export const PrinterCanvas = forwardRef<PrinterCanvasHandle, PrinterCanvasProps>
             },
             setBackground(presetId) {
                 sceneRef.current?.setBackground(presetId);
+            },
+            setBackgroundMode(mode) {
+                sceneRef.current?.setBackgroundMode(mode);
+            },
+            setBackgroundVideo(videoId) {
+                sceneRef.current?.setBackgroundVideo(videoId);
+            },
+            applyCustomVideo(fileOrUrl) {
+                sceneRef.current?.applyCustomVideo(fileOrUrl);
             },
             applyCustomBackground(dataUrl) {
                 sceneRef.current?.applyCustomBackground(dataUrl);

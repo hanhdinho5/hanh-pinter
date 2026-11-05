@@ -1,10 +1,15 @@
 import { useState, useRef } from 'react';
-import { BACKGROUND_PRESETS } from '../printer3d/backgroundManager';
+import { BACKGROUND_PRESETS, VIDEO_PRESETS } from '../printer3d/backgroundManager';
 
 interface QuickBackgroundBarProps {
     currentPresetId: string;
     onSelectPreset: (presetId: string) => void;
     onUploadCustomImage: (dataUrl: string) => void;
+    bgMode?: 'image' | 'video';
+    onToggleBgMode?: (mode: 'image' | 'video') => void;
+    currentVideoId?: string;
+    onSelectVideo?: (videoId: string) => void;
+    onUploadCustomVideo?: (file: File) => void;
     autoRotate: boolean;
     onToggleAutoRotate: (enabled: boolean) => void;
     showButterflies: boolean;
@@ -18,6 +23,11 @@ export function QuickBackgroundBar({
     currentPresetId,
     onSelectPreset,
     onUploadCustomImage,
+    bgMode = 'video',
+    onToggleBgMode,
+    currentVideoId = 'vd1',
+    onSelectVideo,
+    onUploadCustomVideo,
     autoRotate,
     onToggleAutoRotate,
     showButterflies,
@@ -27,9 +37,11 @@ export function QuickBackgroundBar({
     onTriggerBirds,
 }: QuickBackgroundBarProps) {
     const [isOpen, setIsOpen] = useState(false);
+    const [activeTab, setActiveTab] = useState<'video' | 'image'>(bgMode);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const videoInputRef = useRef<HTMLInputElement>(null);
 
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
@@ -41,6 +53,17 @@ export function QuickBackgroundBar({
             }
         };
         reader.readAsDataURL(file);
+    };
+
+    const handleVideoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        onUploadCustomVideo?.(file);
+    };
+
+    const handleSwitchTab = (tab: 'video' | 'image') => {
+        setActiveTab(tab);
+        onToggleBgMode?.(tab);
     };
 
     return (
@@ -63,14 +86,21 @@ export function QuickBackgroundBar({
                 type="file"
                 accept="image/*"
                 style={{ display: 'none' }}
-                onChange={handleFileChange}
+                onChange={handleImageChange}
+            />
+            <input
+                ref={videoInputRef}
+                type="file"
+                accept="video/mp4,video/*"
+                style={{ display: 'none' }}
+                onChange={handleVideoChange}
             />
 
             {/* Menu mở rộng khi bấm vào nút */}
             {isOpen && (
                 <div
                     style={{
-                        background: 'rgba(15, 23, 42, 0.92)',
+                        background: 'rgba(15, 23, 42, 0.94)',
                         backdropFilter: 'blur(16px)',
                         border: '1px solid rgba(56, 189, 248, 0.35)',
                         borderRadius: '14px',
@@ -80,7 +110,7 @@ export function QuickBackgroundBar({
                         gap: '10px',
                         boxShadow: '0 12px 36px rgba(0, 0, 0, 0.7)',
                         maxWidth: '92vw',
-                        width: '380px',
+                        width: '390px',
                         animation: 'fadeIn 0.2s ease',
                     }}
                 >
@@ -103,50 +133,146 @@ export function QuickBackgroundBar({
                         </button>
                     </div>
 
-                    {/* Danh sách các Background Presets */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
-                        {BACKGROUND_PRESETS.map((p) => {
-                            const active = currentPresetId === p.id;
-                            return (
-                                <button
-                                    key={p.id}
-                                    onClick={() => onSelectPreset(p.id)}
-                                    style={{
-                                        background: active ? '#0284c7' : '#1e293b',
-                                        color: active ? '#ffffff' : '#cbd5e1',
-                                        border: `1px solid ${active ? '#38bdf8' : '#334155'}`,
-                                        borderRadius: '8px',
-                                        padding: '7px 4px',
-                                        fontSize: '11px',
-                                        fontWeight: 600,
-                                        cursor: 'pointer',
-                                        textAlign: 'center',
-                                        boxShadow: active ? '0 0 10px rgba(56, 189, 248, 0.4)' : 'none',
-                                    }}
-                                >
-                                    {p.badge}
-                                </button>
-                            );
-                        })}
-
-                        {/* Nút upload ảnh của riêng bạn */}
+                    {/* Bộ chuyển đổi Tab: Video Động vs Ảnh Tĩnh */}
+                    <div
+                        style={{
+                            display: 'flex',
+                            gap: '4px',
+                            background: '#0f172a',
+                            padding: '3px',
+                            borderRadius: '8px',
+                            border: '1px solid #334155',
+                        }}
+                    >
                         <button
-                            onClick={() => fileInputRef.current?.click()}
+                            onClick={() => handleSwitchTab('video')}
                             style={{
-                                background: '#3b0764',
-                                color: '#f3e8ff',
-                                border: '1px dashed #c084fc',
-                                borderRadius: '8px',
-                                padding: '7px 4px',
+                                flex: 1,
+                                padding: '6px 8px',
+                                borderRadius: '6px',
+                                border: 'none',
+                                background: activeTab === 'video' ? '#0284c7' : 'transparent',
+                                color: activeTab === 'video' ? '#ffffff' : '#94a3b8',
+                                fontWeight: 700,
                                 fontSize: '11px',
-                                fontWeight: 600,
                                 cursor: 'pointer',
-                                textAlign: 'center',
+                                transition: 'all 0.2s ease',
                             }}
                         >
-                            📁 Tải Ảnh Lên
+                            🎬 Video Động (9:16)
+                        </button>
+                        <button
+                            onClick={() => handleSwitchTab('image')}
+                            style={{
+                                flex: 1,
+                                padding: '6px 8px',
+                                borderRadius: '6px',
+                                border: 'none',
+                                background: activeTab === 'image' ? '#0284c7' : 'transparent',
+                                color: activeTab === 'image' ? '#ffffff' : '#94a3b8',
+                                fontWeight: 700,
+                                fontSize: '11px',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s ease',
+                            }}
+                        >
+                            🖼️ Ảnh Tĩnh (Wallpaper)
                         </button>
                     </div>
+
+                    {/* NỘI DUNG TAB VIDEO */}
+                    {activeTab === 'video' && (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px' }}>
+                            {VIDEO_PRESETS.map((v) => {
+                                const active = currentVideoId === v.id;
+                                return (
+                                    <button
+                                        key={v.id}
+                                        onClick={() => onSelectVideo?.(v.id)}
+                                        style={{
+                                            background: active ? '#0284c7' : '#1e293b',
+                                            color: active ? '#ffffff' : '#cbd5e1',
+                                            border: `1px solid ${active ? '#38bdf8' : '#334155'}`,
+                                            borderRadius: '8px',
+                                            padding: '8px 6px',
+                                            fontSize: '11px',
+                                            fontWeight: 600,
+                                            cursor: 'pointer',
+                                            textAlign: 'center',
+                                            boxShadow: active ? '0 0 10px rgba(56, 189, 248, 0.4)' : 'none',
+                                        }}
+                                    >
+                                        {v.badge}
+                                    </button>
+                                );
+                            })}
+
+                            {/* Nút upload file video MP4 của riêng bạn */}
+                            <button
+                                onClick={() => videoInputRef.current?.click()}
+                                style={{
+                                    background: '#3b0764',
+                                    color: '#f3e8ff',
+                                    border: '1px dashed #c084fc',
+                                    borderRadius: '8px',
+                                    padding: '8px 6px',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    textAlign: 'center',
+                                }}
+                            >
+                                📁 Tải Video Lên (.mp4)
+                            </button>
+                        </div>
+                    )}
+
+                    {/* NỘI DUNG TAB ẢNH TĨNH */}
+                    {activeTab === 'image' && (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+                            {BACKGROUND_PRESETS.map((p) => {
+                                const active = currentPresetId === p.id;
+                                return (
+                                    <button
+                                        key={p.id}
+                                        onClick={() => onSelectPreset(p.id)}
+                                        style={{
+                                            background: active ? '#0284c7' : '#1e293b',
+                                            color: active ? '#ffffff' : '#cbd5e1',
+                                            border: `1px solid ${active ? '#38bdf8' : '#334155'}`,
+                                            borderRadius: '8px',
+                                            padding: '7px 4px',
+                                            fontSize: '11px',
+                                            fontWeight: 600,
+                                            cursor: 'pointer',
+                                            textAlign: 'center',
+                                            boxShadow: active ? '0 0 10px rgba(56, 189, 248, 0.4)' : 'none',
+                                        }}
+                                    >
+                                        {p.badge}
+                                    </button>
+                                );
+                            })}
+
+                            {/* Nút upload ảnh của riêng bạn */}
+                            <button
+                                onClick={() => fileInputRef.current?.click()}
+                                style={{
+                                    background: '#3b0764',
+                                    color: '#f3e8ff',
+                                    border: '1px dashed #c084fc',
+                                    borderRadius: '8px',
+                                    padding: '7px 4px',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    textAlign: 'center',
+                                }}
+                            >
+                                📁 Tải Ảnh Lên
+                            </button>
+                        </div>
+                    )}
 
                     {/* Điều khiển bổ sung: Tự động đổi cảnh, Đàn bướm, Đàn chim */}
                     <div
@@ -226,8 +352,8 @@ export function QuickBackgroundBar({
                     transition: 'all 0.2s ease',
                 }}
             >
-                <span>🌄</span>
-                <span>{isOpen ? 'Đóng Tùy Chọn' : 'Đổi Background'}</span>
+                <span>🎬</span>
+                <span>{isOpen ? 'Đóng Tùy Chọn' : 'Đổi Video / Background'}</span>
             </button>
         </div>
     );

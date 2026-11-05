@@ -658,6 +658,22 @@ export class PrinterWorkshopScene {
         this.backgroundManager.applyPreset(presetId, true);
     }
 
+    public setBackgroundMode(mode: 'image' | 'video'): void {
+        this.backgroundManager.setMode(mode);
+    }
+
+    public setBackgroundVideo(videoId: string): void {
+        this.backgroundManager.applyVideo(videoId);
+    }
+
+    public applyCustomVideo(fileOrUrl: File | string): void {
+        this.backgroundManager.setCustomVideo(fileOrUrl);
+    }
+
+    public getBackgroundMode(): 'image' | 'video' {
+        return this.backgroundManager.getMode();
+    }
+
     public applyCustomBackground(dataUrl: string): void {
         this.backgroundManager.applyCustomImage(dataUrl);
     }

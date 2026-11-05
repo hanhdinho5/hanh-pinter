@@ -30,6 +30,8 @@ function DashboardView() {
     const [sheet, setSheet] = useState<Sheet>(mockPartialSheet);
     const [cameraPreset, setCameraPreset] = useState<'stream' | 'closeup' | 'overview'>('stream');
     const [obsMode, setObsMode] = useState<boolean>(false);
+    const [bgMode, setBgMode] = useState<'image' | 'video'>('video');
+    const [currentVideoId, setCurrentVideoId] = useState<string>('vd1');
 
     const printerRef = useRef<PrinterCanvasHandle | null>(null);
     const isPrintingRef = useRef(false);
@@ -141,13 +143,34 @@ function DashboardView() {
 
                 {/* Thanh điều khiển chọn Background nhanh trực tiếp trên màn hình */}
                 <QuickBackgroundBar
+                    bgMode={bgMode}
+                    onToggleBgMode={(mode) => {
+                        setBgMode(mode);
+                        printerRef.current?.setBackgroundMode(mode);
+                    }}
+                    currentVideoId={currentVideoId}
+                    onSelectVideo={(videoId) => {
+                        setCurrentVideoId(videoId);
+                        printerRef.current?.setBackgroundVideo(videoId);
+                        printerRef.current?.setBackgroundMode('video');
+                        setBgMode('video');
+                    }}
+                    onUploadCustomVideo={(file) => {
+                        printerRef.current?.applyCustomVideo(file);
+                        printerRef.current?.setBackgroundMode('video');
+                        setBgMode('video');
+                    }}
                     currentPresetId={backgroundConfig?.presetId ?? 'mountain-mist'}
                     onSelectPreset={(presetId) => {
                         printerRef.current?.setBackground(presetId);
+                        printerRef.current?.setBackgroundMode('image');
+                        setBgMode('image');
                         void api.setBackgroundConfig({ presetId });
                     }}
                     onUploadCustomImage={(dataUrl) => {
                         printerRef.current?.applyCustomBackground(dataUrl);
+                        printerRef.current?.setBackgroundMode('image');
+                        setBgMode('image');
                     }}
                     autoRotate={backgroundConfig?.autoRotate ?? false}
                     onToggleAutoRotate={(enabled) => {

@@ -3,7 +3,7 @@ import type { Sheet, PrinterStatus, SheetEntry, QueueState, TikTokStatus } from 
 import type { PrinterCanvasHandle } from '../printer3d/PrinterCanvas';
 import { api } from '../socket/socketClient';
 import { soundManager } from '../audio/SoundManager';
-import { BACKGROUND_PRESETS } from '../printer3d/backgroundManager';
+import { BACKGROUND_PRESETS, VIDEO_PRESETS } from '../printer3d/backgroundManager';
 
 interface DevControlsProps {
     sheet: Sheet;
@@ -83,15 +83,39 @@ export function DevControls({
         }
     };
 
-    // Trạng thái Cảnh nền & Sinh vật bay
+    // Trạng thái Cảnh nền (Video Động hoặc Ảnh Tĩnh) & Sinh vật bay
+    const [bgMode, setBgMode] = useState<'video' | 'image'>('video');
+    const [currentVideo, setCurrentVideo] = useState<string>('vd1');
     const [currentBg, setCurrentBg] = useState('mountain-mist');
     const [autoRotate, setAutoRotate] = useState(false);
     const [showButterflies, setShowButterflies] = useState(true);
     const [showBirds, setShowBirds] = useState(true);
 
+    const handleSwitchBgMode = (mode: 'video' | 'image') => {
+        setBgMode(mode);
+        printerRef.current?.setBackgroundMode(mode);
+    };
+
+    const handleSelectVideo = (videoId: string) => {
+        setCurrentVideo(videoId);
+        setBgMode('video');
+        printerRef.current?.setBackgroundVideo(videoId);
+        printerRef.current?.setBackgroundMode('video');
+    };
+
+    const handleUploadVideo = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setBgMode('video');
+        printerRef.current?.applyCustomVideo(file);
+        printerRef.current?.setBackgroundMode('video');
+    };
+
     const handleSelectBg = (presetId: string) => {
         setCurrentBg(presetId);
+        setBgMode('image');
         printerRef.current?.setBackground(presetId);
+        printerRef.current?.setBackgroundMode('image');
         void api.setBackgroundConfig({ presetId }).catch(() => undefined);
     };
 
@@ -651,39 +675,134 @@ export function DevControls({
 
             {/* MỤC 4: CẢNH NỀN & SINH VẬT TỰ NHIÊN */}
             <div style={{ marginBottom: '16px', background: 'rgba(168, 85, 247, 0.08)', padding: '10px', borderRadius: '8px', border: '1px solid rgba(168, 85, 247, 0.25)' }}>
-                <div style={{ fontWeight: 600, marginBottom: '8px', color: '#c084fc' }}>
-                    🏞️ Cảnh Nền & Sinh Vật Tự Nhiên:
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginBottom: '8px' }}>
-                    {BACKGROUND_PRESETS.map((p) => {
-                        const active = currentBg === p.id;
-                        return (
-                            <button
-                                key={p.id}
-                                onClick={() => handleSelectBg(p.id)}
-                                style={{
-                                    ...btnStyle(active),
-                                    padding: '6px 4px',
-                                    fontSize: '11px',
-                                    background: active ? '#7e22ce' : '#1e293b',
-                                    border: `1px solid ${active ? '#c084fc' : '#334155'}`,
-                                }}
-                            >
-                                {p.badge}
-                            </button>
-                        );
-                    })}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ fontWeight: 600, color: '#c084fc' }}>🏞️ Cảnh Nền & Sinh Vật:</span>
+                    <span style={{ fontSize: '10px', color: '#a855f7', fontWeight: 'bold' }}>
+                        {bgMode === 'video' ? '🎬 Đang dùng VIDEO' : '🖼️ Đang dùng ẢNH'}
+                    </span>
                 </div>
 
+                {/* Tab chuyển đổi giữa Video 9:16 và Ảnh tĩnh */}
+                <div style={{ display: 'flex', gap: '4px', marginBottom: '8px' }}>
+                    <button
+                        onClick={() => handleSwitchBgMode('video')}
+                        style={{
+                            ...btnStyle(bgMode === 'video'),
+                            flex: 1,
+                            padding: '5px',
+                            fontSize: '11px',
+                            background: bgMode === 'video' ? '#059669' : '#1e293b',
+                            border: `1px solid ${bgMode === 'video' ? '#34d399' : '#334155'}`,
+                        }}
+                    >
+                        🎬 Video Động (9:16)
+                    </button>
+                    <button
+                        onClick={() => handleSwitchBgMode('image')}
+                        style={{
+                            ...btnStyle(bgMode === 'image'),
+                            flex: 1,
+                            padding: '5px',
+                            fontSize: '11px',
+                            background: bgMode === 'image' ? '#7e22ce' : '#1e293b',
+                            border: `1px solid ${bgMode === 'image' ? '#c084fc' : '#334155'}`,
+                        }}
+                    >
+                        🖼️ Ảnh Tĩnh
+                    </button>
+                </div>
+
+                {/* Giao diện Video Động */}
+                {bgMode === 'video' && (
+                    <div style={{ marginBottom: '8px' }}>
+                        <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '4px' }}>
+                            Danh sách Video 9:16 (Lặp vô tận - Hardware Decode):
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '6px' }}>
+                            {VIDEO_PRESETS.map((v) => {
+                                const active = currentVideo === v.id;
+                                return (
+                                    <button
+                                        key={v.id}
+                                        onClick={() => handleSelectVideo(v.id)}
+                                        style={{
+                                            ...btnStyle(active),
+                                            padding: '6px 8px',
+                                            fontSize: '11px',
+                                            textAlign: 'left',
+                                            background: active ? '#047857' : '#1e293b',
+                                            border: `1px solid ${active ? '#34d399' : '#334155'}`,
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center',
+                                        }}
+                                    >
+                                        <span>{v.badge}</span>
+                                        <span style={{ fontSize: '10px', opacity: 0.7 }}>{v.id === 'vd1' ? 'Mặc định (User Video)' : v.id}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        <label
+                            style={{
+                                display: 'block',
+                                textAlign: 'center',
+                                padding: '5px 8px',
+                                background: '#1e293b',
+                                border: '1px dashed #64748b',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                color: '#cbd5e1',
+                                cursor: 'pointer',
+                            }}
+                        >
+                            📤 Nạp video khác từ máy tính (.mp4, .webm)
+                            <input
+                                type="file"
+                                accept="video/mp4,video/webm"
+                                onChange={handleUploadVideo}
+                                style={{ display: 'none' }}
+                            />
+                        </label>
+                    </div>
+                )}
+
+                {/* Giao diện Ảnh Tĩnh */}
+                {bgMode === 'image' && (
+                    <div style={{ marginBottom: '8px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginBottom: '6px' }}>
+                            {BACKGROUND_PRESETS.map((p) => {
+                                const active = currentBg === p.id;
+                                return (
+                                    <button
+                                        key={p.id}
+                                        onClick={() => handleSelectBg(p.id)}
+                                        style={{
+                                            ...btnStyle(active),
+                                            padding: '6px 4px',
+                                            fontSize: '11px',
+                                            background: active ? '#7e22ce' : '#1e293b',
+                                            border: `1px solid ${active ? '#c084fc' : '#334155'}`,
+                                        }}
+                                    >
+                                        {p.badge}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '11px', color: '#cbd5e1' }}>
+                            <input
+                                type="checkbox"
+                                checked={autoRotate}
+                                onChange={(e) => handleToggleAutoRotate(e.target.checked)}
+                            />
+                            <span>Tự động đổi cảnh (Auto-Rotate)</span>
+                        </label>
+                    </div>
+                )}
+
+                {/* Bướm và Chim */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#cbd5e1', marginBottom: '8px' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-                        <input
-                            type="checkbox"
-                            checked={autoRotate}
-                            onChange={(e) => handleToggleAutoRotate(e.target.checked)}
-                        />
-                        <span>Tự động đổi cảnh (Auto-Rotate)</span>
-                    </label>
                     <div style={{ display: 'flex', gap: '12px' }}>
                         <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
                             <input
