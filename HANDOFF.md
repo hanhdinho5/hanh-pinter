@@ -49,7 +49,7 @@ Phần lõi chạy hoàn chỉnh, không phụ thuộc TikTok.
   - Lưới 6 ô avatar (2 cột x 3 hàng) với ảnh avatar, tên @username, khung thường bạc và khung vàng VIP lấp lánh (quà ≥ 100 kim cương).
   - Chế độ trang đặc biệt (`kind: 'special'`) cho quà tặng lớn ≥ 1000 kim cương (Full page avatar).
 - Bộ công cụ DevControls:
-  - Chuyển đổi qua lại các bộ dữ liệu mẫu (mockPartialSheet, mockFullSheet, mockSpecialSheet, mockEmptySheet).
+  - Dữ liệu khởi tạo dùng mockPartialSheet; các nút test tạo lượt in trực tiếp.
   - Thử nghiệm in thêm avatar vào các slot trống tiếp theo.
   - Chuyển đổi trạng thái máy in (idle, printing, paused) đồng bộ với đèn LED và màn hình OLED.
   - Đổi góc nhìn camera (9:16 Stream, Cận cảnh, Toàn cảnh xưởng).

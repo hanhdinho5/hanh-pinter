@@ -29,7 +29,8 @@ Trên Windows: `dev-server.bat` và `dev-client.bat`, hoặc `live.bat` (bật c
 Thử khi chưa live: ở `/admin` dùng các nút "Giả lập TikTok" (Chat, Follow, quà 1000, combo Rose).
 
 ## Quy tắc in
-- Comment/follow: mỗi người một lần trên mỗi tờ.
+- Comment: mỗi người tối đa 5 lượt được nhận, sau đó chờ 5 phút tính từ lượt thứ 5 để có lại 5 lượt. Comment bị chặn không kéo dài thời gian chờ; hàng đợi đầy không tính lượt.
+- Follow: vẫn chống trùng trên cùng tờ và áp dụng thời gian chờ riêng như trước.
 - Hàng đợi miễn phí giới hạn `MAX_FREE_QUEUE` (mặc định 30): đầy thì comment/follow mới bị bỏ để avatar không in trễ hàng chục phút.
 - Quà: luôn được in. Tổng kim cương (kim cương x số lượng, combo gộp thành một vé) từ 100 là khung vàng, từ 1000 in nguyên trang. Đổi ngưỡng ở `/admin`.
 

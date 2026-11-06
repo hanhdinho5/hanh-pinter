@@ -39,7 +39,10 @@ export const classifyEvent = (event: ViewerEvent, gift: AppConfig['gift']): Clas
     const totalDiamonds = event.diamondCount * event.giftCount;
     // Quà VIP: chiếm 1 hàng như khung vàng nhưng khung vương miện đẹp hơn (không in nguyên trang nữa)
     if (totalDiamonds >= gift.fullPageDiamonds) return { lane: 'priority', kind: 'single', frame: 'vip' };
+    const giftName = event.giftName?.trim().toLocaleLowerCase();
+    const isRose = event.giftId === '5655' || giftName === 'rose' || giftName === 'hoa hồng';
     if (totalDiamonds >= gift.goldDiamonds) return { lane: 'priority', kind: 'single', frame: 'gold' };
+    if (isRose) return { lane: 'priority', kind: 'single', frame: 'rose' };
     return { lane: 'priority', kind: 'single', frame: 'normal' };
 };
 
@@ -56,6 +59,8 @@ export class EventHandler {
     ) {}
 
     private readonly lastFreePrint = new Map<string, number>();
+    private readonly commentQuota = new Map<string, { count: number; blockedUntil: number }>();
+    private readonly commentCooldownMs = 5 * 60_000;
 
     private inCooldown(userId: string, now: number): boolean {
         if (this.freeCooldownMs <= 0) return false;
@@ -77,9 +82,14 @@ export class EventHandler {
 
         const rule = classifyEvent(event, this.giftConfig);
 
-        // Chỉ lượt in miễn phí mới bị giới hạn 1 lần/tờ; gift luôn được in.
+        // Comment: 5 lượt được nhận, rồi nghỉ 5 phút tính từ lượt thứ 5.
+        const quota = this.commentQuota.get(event.userId);
+        if (event.type === 'COMMENT' && quota && quota.blockedUntil > event.timestamp) {
+            return { accepted: false, reason: 'duplicate', event };
+        }
+        // Follow vẫn chống trùng như trước; quà không bị giới hạn.
         if (
-            rule.lane === 'free' &&
+            event.type === 'FOLLOW' &&
             (this.sheets.hasUser(event.userId) ||
                 this.queue.hasFreeJobFor(event.userId) ||
                 this.inCooldown(event.userId, event.timestamp))
@@ -104,7 +114,19 @@ export class EventHandler {
             sheetId: null,
             slot: null,
         };
-        if (rule.lane === 'free') this.markFreePrint(event.userId, event.timestamp);
+        if (event.type === 'COMMENT') {
+            // Dọn các đợt chờ đã hết hạn; comment bị từ chối không kéo dài thời gian chờ.
+            for (const [id, state] of this.commentQuota) {
+                if (state.blockedUntil > 0 && state.blockedUntil <= event.timestamp) this.commentQuota.delete(id);
+            }
+            const previous = this.commentQuota.get(event.userId);
+            const count = (previous?.count ?? 0) + 1;
+            this.commentQuota.set(event.userId, {
+                count,
+                blockedUntil: count >= 5 ? event.timestamp + this.commentCooldownMs : 0,
+            });
+        }
+        if (event.type === 'FOLLOW') this.markFreePrint(event.userId, event.timestamp);
         this.queue.enqueue(job);
         this.engine.kick();
         return { accepted: true, job, event };

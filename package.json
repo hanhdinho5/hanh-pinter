@@ -7,7 +7,8 @@
     "dev": "pnpm --filter client dev",
     "dev:client": "pnpm --filter client dev",
     "dev:server": "pnpm --filter server dev",
-    "test": "pnpm --filter server test"
+    "test": "pnpm --filter server test",
+    "test:audio": "pnpm --filter server exec tsx --test ../client/tests/SoundManager.test.ts"
   },
   "keywords": [],
   "author": "",

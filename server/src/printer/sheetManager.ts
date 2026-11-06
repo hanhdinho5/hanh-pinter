@@ -107,7 +107,7 @@ export class SheetManager {
 
     /** Thêm avatar vào tờ hiện tại. Hỗ trợ avatar quà to chiếm nguyên một hàng. */
     addEntry(input: EntryInput): { sheet: Sheet; completed: Sheet | null } {
-        const isWide = Boolean(input.isWide ?? (input.frame !== 'normal'));
+        const isWide = Boolean(input.isWide ?? (input.frame === 'gold' || input.frame === 'vip'));
         let status = this.getRowStatus();
         let earlyCompletedSheet: Sheet | null = null;
 

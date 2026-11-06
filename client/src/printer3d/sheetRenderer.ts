@@ -7,9 +7,11 @@ import type { Sheet, SheetEntry } from '../types';
  * - gold (quà ≥ 100 kim cương / quà to chiếm nguyên hàng): thêm khung vàng trang trí quanh avatar, tên chữ vàng.
  * - legend (trang đặc biệt ≥ 1000 kim cương): khung vàng lớn nhất có vương miện và cành nguyệt quế.
  */
+import { DEFAULT_VIEWER_AVATAR } from './avatarManager';
+export { fallbackAvatarUrl, getRandomAvatarUrl, AVAILABLE_AVATARS } from './avatarManager';
+
 type Tier = 'normal' | 'gold' | 'legend';
 
-const TEST_AVATAR_COUNT = 12;
 // Baloo 2: chữ tròn, đậm, rất dễ đọc, đủ dấu tiếng Việt (SIL OFL)
 const NAME_FONT = 'Baloo 2';
 const NAME_WEIGHT = 700;
@@ -31,16 +33,6 @@ function loadNameFont(): Promise<void> {
             });
     }
     return nameFontPromise;
-}
-
-/** Avatar dự phòng (khi người xem không có ảnh): luôn cùng một hình cho cùng một tên. */
-export function fallbackAvatarUrl(username: string): string {
-    let hash = 0;
-    for (let i = 0; i < username.length; i++) {
-        hash = (hash * 31 + username.charCodeAt(i)) | 0;
-    }
-    const idx = (Math.abs(hash) % TEST_AVATAR_COUNT) + 1;
-    return `/avatars/avatar-${String(idx).padStart(2, '0')}.svg`;
 }
 
 /**
@@ -171,12 +163,12 @@ export class SheetCanvasRenderer {
     }
 
     private getAvatarImage(entry: SheetEntry): HTMLImageElement | null {
-        const fallback = fallbackAvatarUrl(entry.username);
+        const fallback = DEFAULT_VIEWER_AVATAR;
         const url = entry.avatarUrl || fallback;
         const img = avatarStore.get(url);
         if (img) return img;
         if (avatarStore.hasFailed(url)) {
-            // Ảnh thật lỗi (TikTok chặn / hết hạn) -> dùng avatar dự phòng theo tên, không thử tải lại
+            // Không ghép ảnh test của người khác khi avatar thật thiếu hoặc tải lỗi.
             const fb = avatarStore.get(fallback);
             if (fb) return fb;
             this.preloadAvatar(fallback);
@@ -322,7 +314,7 @@ export class SheetCanvasRenderer {
         ctx.font = 'bold 32px "Segoe UI", system-ui, sans-serif';
         ctx.fillStyle = '#f8fafc';
         ctx.textAlign = 'left';
-        ctx.fillText('⚡ TIKTOK LIVE PFP PRINTER', 50, 78);
+        ctx.fillText('⚡ TIKTOK LIVE HẠNH ĐINHO', 50, 78);
 
         ctx.font = 'bold 22px monospace';
         ctx.fillStyle = '#38bdf8';
@@ -369,7 +361,7 @@ export class SheetCanvasRenderer {
         const L = this.gridLayout();
         const row = slot < 2 ? 0 : 1;
         const y = L.startY + row * (L.rowH + L.gapY);
-        const wide = Boolean(entry.isWide || entry.frame !== 'normal');
+        const wide = entry.isWide ?? (entry.frame === 'gold' || entry.frame === 'vip');
         const tier: Tier = entry.frame === 'vip' ? 'legend' : entry.frame === 'gold' || wide ? 'gold' : 'normal';
         if (wide) return { x: L.startX, y, w: L.wideW, h: L.rowH, tier };
         const col = slot % 2;
@@ -392,7 +384,7 @@ export class SheetCanvasRenderer {
 
             const rowEntries = sheet.entries.filter((e) => inRow(e.slot));
             const activeHere = inRow(activeSlot) && activeEntry ? activeEntry : undefined;
-            const activeIsWide = Boolean(activeHere && (activeHere.isWide || activeHere.frame !== 'normal'));
+            const activeIsWide = Boolean(activeHere && (activeHere.isWide ?? (activeHere.frame === 'gold' || activeHere.frame === 'vip')));
             const wideEntry = activeIsWide ? activeHere : rowEntries.find((e) => e.isWide);
 
             if (wideEntry) {
@@ -498,6 +490,9 @@ export class SheetCanvasRenderer {
 
         if (tier === 'normal') {
             this.drawAvatarCircle(cx, cy, r, entry, 'normal');
+            if (entry.frame === 'rose') {
+                this.drawRoseFrame(cx, cy, r);
+            }
         } else {
             this.drawGoldFrame(cx, cy, r, tier, gleam, () => this.drawAvatarCircle(cx, cy, r, entry, tier));
         }
@@ -509,6 +504,110 @@ export class SheetCanvasRenderer {
         this.drawName(entry.username, cx, nameY, w - 40, maxFont, tier);
     }
 
+    /** Khung đá quý pastel: kim loại hồng/xanh, bốn viên đá cắt hình thoi. */
+    private drawRoseFrame(cx: number, cy: number, r: number): void {
+        const ctx = this.ctx;
+        ctx.save();
+        const ring = (radius: number, width: number, color: string | CanvasGradient) => {
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+            ctx.lineWidth = width;
+            ctx.strokeStyle = color;
+            ctx.stroke();
+        };
+        const metal = ctx.createLinearGradient(cx - r, cy + r * 0.45, cx + r, cy - r * 0.45);
+        metal.addColorStop(0, '#743e50');
+        metal.addColorStop(0.18, '#be7f87');
+        metal.addColorStop(0.38, '#ffddd1');
+        metal.addColorStop(0.5, '#fff6de');
+        metal.addColorStop(0.62, '#d7f4cd');
+        metal.addColorStop(0.82, '#86b9a0');
+        metal.addColorStop(1, '#416d66');
+
+        // Bóng nhẹ dưới khung; giữ thoáng vùng avatar.
+        ctx.shadowColor = 'rgba(81, 48, 55, 0.23)';
+        ctx.shadowBlur = 7;
+        ctx.shadowOffsetY = 3;
+        ring(r + 10, 24, '#a8787c');
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetY = 0;
+        ring(r + 10, 22, metal);
+        ring(r + 22, 1.5, '#b88b91');
+        ring(r + 20, 2.5, '#fff0db');
+        ring(r + 15, 1.7, '#71545a');
+        ring(r + 12.5, 2, '#fff4df');
+        ring(r + 5, 2, '#72535d');
+        ring(r + 2.5, 2.5, '#ffe9df');
+        ring(r + 0.5, 1, '#b18091');
+
+        // Vệt phản sáng mảnh trên hai nửa ánh kim.
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = 'rgba(255, 249, 227, 0.85)';
+        for (const start of [-2.95, -1.35]) {
+            ctx.beginPath();
+            ctx.arc(cx, cy, r + 17, start, start + 1.15);
+            ctx.stroke();
+        }
+
+        const stone = (angle: number, blue: boolean) => {
+            const x = cx + Math.cos(angle) * (r + 11);
+            const y = cy + Math.sin(angle) * (r + 11);
+            ctx.save();
+            ctx.translate(x, y);
+            const diamond = (size: number) => {
+                ctx.beginPath();
+                ctx.moveTo(0, -size);
+                ctx.lineTo(size * 0.83, 0);
+                ctx.lineTo(0, size);
+                ctx.lineTo(-size * 0.83, 0);
+                ctx.closePath();
+            };
+            ctx.shadowColor = 'rgba(66, 45, 68, 0.35)';
+            ctx.shadowBlur = 3;
+            ctx.shadowOffsetY = 2;
+            diamond(20);
+            ctx.fillStyle = '#fce4d2';
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetY = 0;
+            ctx.strokeStyle = '#8d7586';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            const gem = ctx.createLinearGradient(-12, -13, 12, 14);
+            gem.addColorStop(0, blue ? '#d3e6ff' : '#fff0eb');
+            gem.addColorStop(0.45, blue ? '#6e9cdb' : '#e8a6bc');
+            gem.addColorStop(1, blue ? '#334b90' : '#ad6b88');
+            diamond(16);
+            ctx.fillStyle = gem;
+            ctx.fill();
+            const facet = (points: number[], color: string) => {
+                ctx.beginPath();
+                ctx.moveTo(points[0], points[1]);
+                for (let i = 2; i < points.length; i += 2) ctx.lineTo(points[i], points[i + 1]);
+                ctx.closePath();
+                ctx.fillStyle = color;
+                ctx.fill();
+            };
+            facet([0, -16, -13, 0, -4, -1], blue ? '#bcd6f5' : '#fbd8de');
+            facet([0, -16, 13, 0, 4, -1], blue ? '#819ed0' : '#e5aec4');
+            facet([-13, 0, 0, 16, -4, -1], blue ? '#5776b0' : '#c68ba7');
+            facet([13, 0, 0, 16, 4, -1], blue ? '#3e568e' : '#b27897');
+            facet([0, -9, 5, 0, 0, 9, -5, 0], blue ? '#98bdec' : '#efc3cf');
+            ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(-12, 0);
+            ctx.lineTo(0, -15);
+            ctx.lineTo(5, -9);
+            ctx.stroke();
+            ctx.restore();
+        };
+        stone(-Math.PI / 2, true);
+        stone(Math.PI, true);
+        stone(0, false);
+        stone(Math.PI / 2, false);
+        ctx.restore();
+    }
     private drawAvatarCircle(cx: number, cy: number, r: number, entry: SheetEntry, tier: Tier): void {
         const ctx = this.ctx;
         const img = this.getAvatarImage(entry);

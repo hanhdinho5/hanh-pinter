@@ -54,7 +54,7 @@ function DashboardView() {
                 avatarUrl: job.avatarUrl,
                 frame: job.frame,
                 // Server xếp quà vàng chiếm nguyên 1 hàng -> client vẽ đúng như vậy ngay từ đầu
-                isWide: job.frame !== 'normal',
+                isWide: job.frame === 'gold' || job.frame === 'vip',
                 sheetId: job.sheetId ?? undefined,
             };
 

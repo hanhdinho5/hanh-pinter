@@ -25,12 +25,11 @@ test('combo quà gộp thành MỘT vé với tổng kim cương (khung vàng kh
     assert.equal(jobs[0]?.frame, 'gold');
 });
 
-test('chat từ cùng một người chỉ in một lần trên mỗi tờ', () => {
+test('chat từ cùng một người nhận tối đa 5 lượt liên tiếp', () => {
     const core = createCore(config);
     core.engine.pause();
-    core.tiktok.simulate('chat', { user: user('b') });
-    core.tiktok.simulate('chat', { user: user('b') });
-    assert.equal(core.queue.snapshot().pendingFree.length, 1);
+    for (let i = 0; i < 7; i++) core.tiktok.simulate('chat', { user: user('b') });
+    assert.equal(core.queue.snapshot().pendingFree.length, 5);
 });
 
 test('hàng đợi miễn phí đầy thì bỏ comment mới, quà vẫn vào', () => {

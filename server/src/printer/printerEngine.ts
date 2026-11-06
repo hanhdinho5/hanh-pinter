@@ -85,7 +85,7 @@ export class PrinterEngine {
         this.currentJob = job;
         // Mọi bước đều nằm trong try: lỗi bất kỳ chỉ làm hỏng job này, máy in không bị kẹt
         try {
-            const isWide = job.frame !== 'normal';
+            const isWide = job.frame === 'gold' || job.frame === 'vip';
 
             // Đổi tờ (nếu cần) TRƯỚC khi in để client vẽ lên đúng tờ, đúng ô
             const isFullPage = job.kind === 'fullPage';
@@ -122,7 +122,7 @@ export class PrinterEngine {
             username: job.username,
             avatarUrl: job.avatarUrl,
             frame: job.frame,
-            isWide: job.frame !== 'normal',
+            isWide: job.frame === 'gold' || job.frame === 'vip',
         };
 
         if (job.kind === 'fullPage') {

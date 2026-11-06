@@ -24,6 +24,16 @@ test('extractUser trích xuất chính xác userId và username từ các cấu 
     assert.equal(u4.username, 'Viewer');
 });
 
+test('ưu tiên tên hiển thị có dấu/emoji; thiếu tên mới dùng username, giữ nguyên userId', () => {
+    const account = { userId: '123', uniqueId: 'kuv.yog.7641176' };
+    assert.deepEqual(extractUser({ user: { ...account, nickname: 'KUV YOG HMOOB❤️❤️' } }), {
+        userId: '123', username: 'KUV YOG HMOOB❤️❤️',
+    });
+    assert.equal(extractUser({ ...account, nickname: 'Hạnh Đinho' }).username, 'Hạnh Đinho');
+    assert.equal(extractUser({ user: { ...account, nickname: '  ' } }).username, account.uniqueId);
+    assert.equal(extractUser({ user: account, nickname: 'Minh Anh' }).username, 'Minh Anh');
+});
+
 test('extractAvatarUrl trích xuất avatar theo độ ưu tiên', () => {
     // 1. profilePictureUrl chuỗi trực tiếp
     const a1 = extractAvatarUrl({ profilePictureUrl: 'https://p16.tiktokcdn.com/avatar1.jpg' });

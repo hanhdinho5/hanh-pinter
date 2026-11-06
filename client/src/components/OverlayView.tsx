@@ -2,8 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { PrinterCanvas, type PrinterCanvasHandle } from '../printer3d/PrinterCanvas';
 import { usePrinterSocket } from '../socket/usePrinterSocket';
 import { soundManager } from '../audio/SoundManager';
-import { QuickBackgroundBar } from './QuickBackgroundBar';
-import { api } from '../socket/socketClient';
 import type { Sheet, SheetEntry, PrintJob } from '../types';
 
 export function OverlayView() {
@@ -20,8 +18,6 @@ export function OverlayView() {
     });
 
     const isPrintingRef = useRef(false);
-    const [bgMode, setBgMode] = useState<'image' | 'video'>('image');
-    const [currentVideoId, setCurrentVideoId] = useState('vd1');
 
     // Tham số URL (ưu tiên hơn cài đặt trong Admin): ?bgm=1|0, ?mute=1, ?sfxVol=0.8, ?bgmVol=0.5
     const urlAudio = useRef(new URLSearchParams(window.location.search));
@@ -80,7 +76,7 @@ export function OverlayView() {
                 avatarUrl: job.avatarUrl,
                 frame: job.frame,
                 // Server xếp quà vàng chiếm nguyên 1 hàng -> client vẽ đúng như vậy ngay từ đầu
-                isWide: job.frame !== 'normal',
+                isWide: job.frame === 'gold' || job.frame === 'vip',
                 sheetId: job.sheetId ?? undefined,
             };
 
@@ -126,11 +122,9 @@ export function OverlayView() {
                 // Chế độ nền đã lưu (ảnh động / video) -> giữ nguyên kể cả khi LIVE Studio tải lại trang
                 if (config.videoId && config.videoId !== 'custom') {
                     printerRef.current.setBackgroundVideo(config.videoId);
-                    setCurrentVideoId(config.videoId);
                 }
                 if (config.mode) {
                     printerRef.current.setBackgroundMode(config.mode);
-                    setBgMode(config.mode);
                 }
             }
         },
@@ -141,11 +135,9 @@ export function OverlayView() {
         if (!backgroundConfig || !printerRef.current) return;
         if (backgroundConfig.videoId && backgroundConfig.videoId !== 'custom') {
             printerRef.current.setBackgroundVideo(backgroundConfig.videoId);
-            setCurrentVideoId(backgroundConfig.videoId);
         }
         if (backgroundConfig.mode) {
             printerRef.current.setBackgroundMode(backgroundConfig.mode);
-            setBgMode(backgroundConfig.mode);
         }
     }, [backgroundConfig]);
 
@@ -192,59 +184,6 @@ export function OverlayView() {
                 rotateIntervalMinutes={backgroundConfig?.intervalMinutes ?? 5}
                 showButterflies={backgroundConfig?.showButterflies ?? true}
                 showBirds={backgroundConfig?.showBirds ?? true}
-            />
-
-            {/* Thanh điều khiển chọn Background nhanh (luôn có sẵn để đổi video / ảnh) */}
-            <QuickBackgroundBar
-                autoHide
-                currentPresetId={backgroundConfig?.presetId ?? 'mountain-mist'}
-                bgMode={bgMode}
-                onToggleBgMode={(mode) => {
-                    setBgMode(mode);
-                    printerRef.current?.setBackgroundMode(mode);
-                    api.setBackgroundConfig({ mode }).catch(() => undefined);
-                }}
-                currentVideoId={currentVideoId}
-                onSelectVideo={(videoId) => {
-                    setCurrentVideoId(videoId);
-                    printerRef.current?.setBackgroundVideo(videoId);
-                    printerRef.current?.setBackgroundMode('video');
-                    setBgMode('video');
-                    api.setBackgroundConfig({ mode: 'video', videoId }).catch(() => undefined);
-                }}
-                onUploadCustomVideo={(file) => {
-                    printerRef.current?.applyCustomVideo(file);
-                    setBgMode('video');
-                }}
-                onSelectPreset={(presetId) => {
-                    printerRef.current?.setBackground(presetId);
-                    printerRef.current?.setBackgroundMode('image');
-                    setBgMode('image');
-                    api.setBackgroundConfig({ presetId, mode: 'image' }).catch(() => undefined);
-                }}
-                onUploadCustomImage={(dataUrl) => {
-                    printerRef.current?.applyCustomBackground(dataUrl);
-                    printerRef.current?.setBackgroundMode('image');
-                    setBgMode('image');
-                }}
-                autoRotate={backgroundConfig?.autoRotate ?? false}
-                onToggleAutoRotate={(enabled) => {
-                    printerRef.current?.setAutoRotate(enabled, 5);
-                    api.setBackgroundConfig({ autoRotate: enabled }).catch(() => undefined);
-                }}
-                showButterflies={backgroundConfig?.showButterflies ?? true}
-                onToggleButterflies={(enabled) => {
-                    printerRef.current?.setCreaturesVisible(enabled, backgroundConfig?.showBirds ?? true);
-                    api.setBackgroundConfig({ showButterflies: enabled }).catch(() => undefined);
-                }}
-                showBirds={backgroundConfig?.showBirds ?? true}
-                onToggleBirds={(enabled) => {
-                    printerRef.current?.setCreaturesVisible(backgroundConfig?.showButterflies ?? true, enabled);
-                    api.setBackgroundConfig({ showBirds: enabled }).catch(() => undefined);
-                }}
-                onTriggerBirds={() => {
-                    printerRef.current?.triggerBirdFlock();
-                }}
             />
 
             {/* Trạng thái kết nối nhỏ ở góc trên cho streamer kiểm tra */}

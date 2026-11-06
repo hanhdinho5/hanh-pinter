@@ -1,4 +1,6 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { Core } from '../app.js';
 import type { NewEventInput } from '../events/eventHandler.js';
 import { config } from '../config.js';
@@ -150,6 +152,64 @@ export const createRouter = (core: Core): Router => {
     });
 
     // --- Cấu hình Cảnh Nền Background & Sinh Vật Bay ---
+    // Quét thư mục ảnh backgrounds/ (chỉ quét lần đầu, lưu cache vào RAM để không gây nặng server)
+    let cachedBgList: Array<{ id: string; name: string; url: string; badge: string }> | null = null;
+    router.get('/backgrounds', (_req, res) => {
+        if (!cachedBgList) {
+            try {
+                const candidates = [
+                    path.resolve(process.cwd(), '../client/public/backgrounds'),
+                    path.resolve(process.cwd(), 'client/public/backgrounds'),
+                ];
+                const foundDir = candidates.find((d) => fs.existsSync(d));
+                if (foundDir) {
+                    const files = fs.readdirSync(foundDir).filter((f) => /\.(png|jpe?g|webp|gif|svg)$/i.test(f));
+                    cachedBgList = files.map((fileName, idx) => {
+                        const baseName = fileName.replace(/\.[^/.]+$/, '');
+                        const id = baseName;
+                        const name = baseName === 'mountain-mist' ? 'Thung Lũng Mây' : `Cảnh ${idx + 1} (${fileName})`;
+                        const badge = baseName === 'mountain-mist' ? '🌄 THUNG LŨNG MÂY' : `🌄 CẢNH ${idx + 1}`;
+                        return { id, name, url: `/backgrounds/${fileName}`, badge };
+                    });
+                }
+            } catch {
+                cachedBgList = null;
+            }
+        }
+        res.json(cachedBgList ?? []);
+    });
+
+    // Quét thư mục avatar mẫu client/public/avatars/ (chỉ quét lần đầu, lưu cache vào RAM)
+    let cachedAvatarList: string[] | null = null;
+    let watchedAvatarDir: string | null = null;
+    router.get('/avatars', (_req, res) => {
+        if (!cachedAvatarList) {
+            try {
+                const candidates = [
+                    path.resolve(process.cwd(), '../client/public/avatars'),
+                    path.resolve(process.cwd(), 'client/public/avatars'),
+                ];
+                const foundDir = candidates.find((d) => fs.existsSync(d));
+                if (foundDir) {
+                    if (watchedAvatarDir !== foundDir) {
+                        // Chỉ vô hiệu cache khi file được thêm/xóa/đổi tên, không quét lặp theo frame.
+                        const watcher = fs.watch(foundDir, { persistent: false }, () => { cachedAvatarList = null; });
+                        watcher.on('error', () => { cachedAvatarList = null; });
+                        watchedAvatarDir = foundDir;
+                    }
+                    const files = fs.readdirSync(foundDir, { withFileTypes: true })
+                        .filter((entry) => entry.isFile() && /\.(png|jpe?g|webp|gif|svg|avif)$/i.test(entry.name))
+                        .map((entry) => entry.name)
+                        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+                    cachedAvatarList = files.map((fileName) => `/avatars/${encodeURIComponent(fileName)}`);
+                }
+            } catch {
+                cachedAvatarList = null;
+            }
+        }
+        res.json(cachedAvatarList ?? []);
+    });
+
     router.get('/config/background', (_req, res) => {
         res.json(getBackgroundConfig());
     });
@@ -243,8 +303,9 @@ export const createRouter = (core: Core): Router => {
         const kind = req.body['kind'];
         if (kind !== 'chat' && kind !== 'follow' && kind !== 'gift') throw new HttpError(400, 'kind phải là chat|follow|gift');
         const id = str(req.body, 'uniqueId', true) as string;
+        const avatarUrl = str(req.body, 'avatarUrl', false);
         const data: Record<string, unknown> = {
-            user: { userId: `sim-${id}`, uniqueId: id, nickname: id, avatarThumb: { urlList: [] } },
+            user: { userId: `sim-${id}`, uniqueId: id, nickname: id, avatarThumb: { urlList: avatarUrl ? [avatarUrl] : [] } },
             comment: 'xin chào',
         };
         if (kind === 'gift') {

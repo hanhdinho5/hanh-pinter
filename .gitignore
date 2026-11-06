@@ -11,3 +11,9 @@ dist-ssr/
 .vscode/*
 !.vscode/extensions.json
 data/
+tools/
+
+# Nhạc dài chỉ giữ trên máy livestream (vượt giới hạn file GitHub).
+client/public/music/lofi-piano-water-2h.mp3
+client/public/music/lofi-chill-beats-3h.mp3
+client/public/music/lofi-study-relax-3h.mp3

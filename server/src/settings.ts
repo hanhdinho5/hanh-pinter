@@ -77,3 +77,16 @@ export const saveSettings = (patch: PersistedSettings): void => {
         console.error('Không lưu được settings.json:', err);
     }
 };
+
+let saveTimer: NodeJS.Timeout | null = null;
+let pendingPatch: PersistedSettings = {};
+
+export const saveSettingsDebounced = (patch: PersistedSettings, delayMs = 300): void => {
+    pendingPatch = { ...pendingPatch, ...patch };
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+        saveSettings(pendingPatch);
+        pendingPatch = {};
+        saveTimer = null;
+    }, delayMs);
+};

@@ -1,15 +1,17 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { Sheet, PrinterStatus, SheetEntry, QueueState, TikTokStatus } from '../types';
 import type { PrinterCanvasHandle } from '../printer3d/PrinterCanvas';
 import { api } from '../socket/socketClient';
 import { soundManager } from '../audio/SoundManager';
 import { BACKGROUND_PRESETS } from '../printer3d/backgroundManager';
+import { getRandomAvatarUrl } from '../printer3d/avatarManager';
 import { useAvailableVideos } from './useAvailableVideos';
+import { pickTestName } from '../printer3d/testNames';
 
 // Lưu âm lượng lên server (gộp các lần kéo thanh trượt) để overlay OBS cùng nhận
 let audioTimer: ReturnType<typeof setTimeout> | null = null;
-let audioPatch: { sfxVolume?: number; bgmVolume?: number } = {};
-const saveAudioSoon = (patch: { sfxVolume?: number; bgmVolume?: number }) => {
+let audioPatch: Partial<import('../types').AudioConfig> = {};
+const saveAudioSoon = (patch: Partial<import('../types').AudioConfig>) => {
     audioPatch = { ...audioPatch, ...patch };
     if (audioTimer) clearTimeout(audioTimer);
     audioTimer = setTimeout(() => {
@@ -34,13 +36,6 @@ interface DevControlsProps {
     tiktokStatus: TikTokStatus | null;
 }
 
-const TEST_NAMES = ['luna.moon', 'kai_gaming', 'mochi_cute', 'zara.dance', 'leo_official', 'nova_star', 'bao_ngoc', 'mai_anh_99', 'sky.vibes', 'ruby_rose', 'finn_live', 'lily_lofi'];
-const TEST_VIP_NAMES = ['golden_dragon', 'queen_of_gifts', 'diamond_king', 'luxury_lily'];
-
-function pickTestName(vip: boolean): string {
-    const list = vip ? TEST_VIP_NAMES : TEST_NAMES;
-    return list[Math.floor(Math.random() * list.length)];
-}
 
 export function DevControls({
     sheet,
@@ -64,34 +59,55 @@ export function DevControls({
 
     // Trạng thái Âm thanh & Nhạc nền
     const [bgmPlaying, setBgmPlaying] = useState(soundManager.getBgmPlaying());
+    const [bgmTrack, setBgmTrack] = useState(soundManager.getCurrentTrackName());
     const [isMuted, setIsMuted] = useState(soundManager.isSoundMuted());
     const [bgmVol, setBgmVol] = useState(Math.round(soundManager.getBgmVolume() * 100));
     const [sfxVol, setSfxVol] = useState(Math.round(soundManager.getSfxVolume() * 100));
+
+    // Lắng nghe thay đổi âm lượng thời gian thực (từ /admin hoặc socket)
+    useEffect(() => {
+        const syncFromSound = () => {
+            setSfxVol(Math.round(soundManager.getSfxVolume() * 100));
+            setBgmVol(Math.round(soundManager.getBgmVolume() * 100));
+            setIsMuted(soundManager.isSoundMuted());
+            setBgmPlaying(soundManager.getBgmPlaying());
+            setBgmTrack(soundManager.getCurrentTrackName());
+        };
+        return soundManager.subscribe(syncFromSound);
+    }, []);
 
     const handleToggleBgm = () => {
         if (bgmPlaying) {
             soundManager.stopBgm();
             setBgmPlaying(false);
+            api.updateAudioRealtime({ bgmEnabled: false });
+            saveAudioSoon({ bgmEnabled: false });
         } else {
             soundManager.startBgm();
             setBgmPlaying(true);
+            api.updateAudioRealtime({ bgmEnabled: true });
+            saveAudioSoon({ bgmEnabled: true });
         }
     };
 
     const handleToggleMute = () => {
         const muted = soundManager.toggleMute();
         setIsMuted(muted);
+        api.updateAudioRealtime({ muted });
+        saveAudioSoon({ muted });
     };
 
     const handleChangeBgmVol = (val: number) => {
         setBgmVol(val);
         soundManager.setBgmVolume(val / 100);
+        api.updateAudioRealtime({ bgmVolume: val / 100 });
         saveAudioSoon({ bgmVolume: val / 100 });
     };
 
     const handleChangeSfxVol = (val: number) => {
         setSfxVol(val);
         soundManager.setSfxVolume(val / 100);
+        api.updateAudioRealtime({ sfxVolume: val / 100 });
         saveAudioSoon({ sfxVolume: val / 100 });
     };
 
@@ -194,17 +210,7 @@ export function DevControls({
 
     // Gửi sự kiện giả lập tới REST API của Backend Server
     const handleSendRealEvent = async (type: 'COMMENT' | 'FOLLOW' | 'GIFT', isVip = false) => {
-        const randomNames = [
-            'alex_tiktok',
-            'cyber_kitty',
-            'hoang_anh_99',
-            'linh_dan_live',
-            'panda_bamboo',
-            'dragon_lord',
-            'phoenix_fire',
-            'tokyo_stream',
-        ];
-        const randomUser = randomNames[Math.floor(Math.random() * randomNames.length)];
+        const randomUser = pickTestName();
 
         try {
             if (type === 'COMMENT') {
@@ -290,8 +296,8 @@ export function DevControls({
             slot: nextSlot,
             jobId: `job-offline-${Date.now()}`,
             userId: `user-${Date.now()}`,
-            username: pickTestName(isGold),
-            avatarUrl: `/avatars/avatar-${String(1 + Math.floor(Math.random() * 12)).padStart(2, '0')}.svg`,
+            username: pickTestName(),
+            avatarUrl: getRandomAvatarUrl(),
             frame: isGold ? 'gold' : 'normal',
             isWide,
         };
@@ -640,6 +646,9 @@ export function DevControls({
                 </div>
 
                 {/* Thanh trượt âm lượng */}
+                <div style={{ color: '#94a3b8', fontSize: '11px', marginBottom: '8px', overflowWrap: 'anywhere' }}>
+                    Bài hiện tại: {bgmTrack}
+                </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '8px', fontSize: '11px' }}>
                     <div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8', marginBottom: '2px' }}>
@@ -795,7 +804,7 @@ export function DevControls({
                 {/* Giao diện Ảnh Tĩnh */}
                 {bgMode === 'image' && (
                     <div style={{ marginBottom: '8px' }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginBottom: '6px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '4px', marginBottom: '6px' }}>
                             {BACKGROUND_PRESETS.map((p) => {
                                 const active = currentBg === p.id;
                                 return (

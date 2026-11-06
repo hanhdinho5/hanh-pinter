@@ -15,7 +15,7 @@ export interface ViewerEvent {
 }
 
 /** gold: quà ≥ ngưỡng vàng; vip: quà ≥ ngưỡng VIP (khung vương miện). Cả hai đều chiếm nguyên 1 hàng. */
-export type FrameType = 'normal' | 'gold' | 'vip';
+export type FrameType = 'normal' | 'rose' | 'gold' | 'vip';
 export type JobKind = 'single' | 'fullPage';
 export type JobLane = 'free' | 'priority';
 export type JobStatus = 'pending' | 'printing' | 'completed' | 'failed';

@@ -18,6 +18,20 @@ class SoundManager {
     private paperStrokeLFO: OscillatorNode | null = null;
     private printGainNode: GainNode | null = null;
     private isPrintingSoundActive = false;
+    private printSoundGeneration = 0;
+    private printSoundDeadline = 0;
+    private printSoundWatchdog: ReturnType<typeof setInterval> | null = null;
+
+    /** Tiếng cọ chỉ sống khi hoạt ảnh thực sự tiếp tục vẽ. */
+    public keepPrintSoundAlive(isGold = false): void {
+        this.printSoundDeadline = Date.now() + 350;
+        this.startPrintSound(isGold);
+        if (this.isPrintingSoundActive && !this.printSoundWatchdog) {
+            this.printSoundWatchdog = setInterval(() => {
+                if (Date.now() >= this.printSoundDeadline) this.stopPrintSound();
+            }, 100);
+        }
+    }
 
     // Nhạc nền (BGM Audio Element)
     private bgmAudio: HTMLAudioElement | null = null;
@@ -25,9 +39,32 @@ class SoundManager {
     private currentBgmIndex = 0;
     private isBgmPlaying = false;
 
+    // Danh sách lắng nghe thay đổi âm lượng / trạng thái âm thanh để đồng bộ UI tức thì
+    private listeners = new Set<() => void>();
+
+    public subscribe(listener: () => void): () => void {
+        this.listeners.add(listener);
+        return () => {
+            this.listeners.delete(listener);
+        };
+    }
+
+    private notifyListeners(): void {
+        for (const fn of this.listeners) {
+            try {
+                fn();
+            } catch {
+                // ignore
+            }
+        }
+    }
+
     constructor() {
-        // Khởi tạo danh sách file nhạc mẫu (người dùng có thể thả file vào public/music/)
+        // Khởi tạo danh sách file nhạc nền (gồm 3 bản Chill dài 8 tiếng + các bài mẫu)
         this.bgmPlaylist = [
+            '/music/lofi-piano-water-2h.mp3',
+            '/music/lofi-chill-beats-3h.mp3',
+            '/music/lofi-study-relax-3h.mp3',
             '/music/lofi-1.mp3',
             '/music/lofi-2.mp3',
             '/music/bgm.mp3',
@@ -103,9 +140,10 @@ class SoundManager {
     public startPrintSound(isGold = false): void {
         if (this.isMuted || this.isPrintingSoundActive) return;
         this.isPrintingSoundActive = true;
+        const generation = ++this.printSoundGeneration;
         void this.loadPenBuffer().then(() => {
             // Lượt in đã kết thúc trong lúc đang nạp file
-            if (!this.isPrintingSoundActive || this.printGainNode) return;
+            if (generation !== this.printSoundGeneration || !this.isPrintingSoundActive || this.printGainNode) return;
             if (this.penBuffer) this.startFilePrintSound(isGold);
             else this.startSynthesizedPrintSound(isGold);
         });
@@ -293,6 +331,9 @@ class SoundManager {
      */
     public stopPrintSound(): void {
         this.isPrintingSoundActive = false;
+        this.printSoundGeneration++;
+        if (this.printSoundWatchdog) clearInterval(this.printSoundWatchdog);
+        this.printSoundWatchdog = null;
 
         if (this.ctx && this.printGainNode) {
             const gainNode = this.printGainNode;
@@ -417,6 +458,9 @@ class SoundManager {
     /** Số bài lỗi liên tiếp: lỗi cả vòng thì dừng, không thử mãi */
     private bgmFailures = 0;
     private bgmRetryTimer: ReturnType<typeof setTimeout> | null = null;
+    private bgmWatchdog: ReturnType<typeof setInterval> | null = null;
+    private bgmLastProgress = 0;
+    private bgmLastTime = 0;
     private bgmListeners = new Set<(playing: boolean) => void>();
 
     /** Theo dõi trạng thái phát thật (để giao diện hiển thị đúng). */
@@ -429,6 +473,7 @@ class SoundManager {
         if (this.isBgmPlaying === playing) return;
         this.isBgmPlaying = playing;
         for (const cb of this.bgmListeners) cb(playing);
+        this.notifyListeners();
     }
 
     /**
@@ -436,20 +481,7 @@ class SoundManager {
      */
     public startBgm(): void {
         this.bgmWanted = true;
-        if (this.isBgmPlaying) return;
-
-        if (!this.bgmAudio) {
-            this.bgmAudio = new Audio();
-            this.bgmAudio.volume = this.isMuted ? 0 : this.bgmVolume;
-            this.bgmAudio.addEventListener('ended', () => this.playNextBgmTrack());
-            // File thiếu / hỏng -> chuyển bài kế, lỗi hết cả danh sách thì dừng
-            this.bgmAudio.addEventListener('error', () => this.onBgmTrackFailed());
-            this.bgmAudio.addEventListener('playing', () => {
-                this.bgmFailures = 0;
-                this.setBgmPlaying(true);
-            });
-            this.bgmAudio.addEventListener('pause', () => this.setBgmPlaying(false));
-        }
+        if (this.bgmWatchdog) return;
         this.bgmFailures = 0;
         this.playCurrentBgmTrack();
     }
@@ -461,23 +493,73 @@ class SoundManager {
         this.bgmWanted = false;
         if (this.bgmRetryTimer) clearTimeout(this.bgmRetryTimer);
         this.bgmRetryTimer = null;
+        if (this.bgmWatchdog) clearInterval(this.bgmWatchdog);
+        this.bgmWatchdog = null;
         this.bgmAudio?.pause();
         this.setBgmPlaying(false);
     }
 
     private playCurrentBgmTrack(): void {
-        if (!this.bgmAudio || this.bgmPlaylist.length === 0 || !this.bgmWanted) return;
+        if (this.bgmPlaylist.length === 0 || !this.bgmWanted) return;
 
         const trackUrl = this.bgmPlaylist[this.currentBgmIndex];
-        if (!this.bgmAudio.src.endsWith(trackUrl)) this.bgmAudio.src = trackUrl;
-        this.bgmAudio.volume = this.isMuted ? 0 : this.bgmVolume;
+        if (!this.bgmAudio || !this.bgmAudio.src.endsWith(trackUrl)) {
+            const old = this.bgmAudio;
+            this.bgmAudio = null;
+            old?.pause();
+            old?.removeAttribute('src');
+            old?.load();
+            const audio = new Audio(trackUrl);
+            audio.loop = false;
+            audio.preload = 'auto';
+            this.bgmAudio = audio;
+            const active = () => this.bgmAudio === audio && this.bgmWanted;
+            audio.addEventListener('ended', () => {
+                if (active()) this.playNextBgmTrack();
+            });
+            audio.addEventListener('error', () => {
+                if (active()) this.onBgmTrackFailed();
+            });
+            audio.addEventListener('playing', () => {
+                if (!active()) return;
+                this.bgmFailures = 0;
+                this.setBgmPlaying(true);
+            });
+            audio.addEventListener('pause', () => {
+                if (active()) this.setBgmPlaying(false);
+            });
+            this.setBgmPlaying(false);
+            this.notifyListeners();
+        }
+        const audio = this.bgmAudio;
+        audio.volume = this.isMuted ? 0 : this.bgmVolume;
+        if (this.bgmRetryTimer) clearTimeout(this.bgmRetryTimer);
+        this.bgmRetryTimer = null;
+        if (this.bgmWatchdog) clearInterval(this.bgmWatchdog);
+        this.bgmLastTime = audio.currentTime;
+        this.bgmLastProgress = Date.now();
+        // Bảo vệ cả trường hợp mất sự kiện ended và tải file bị đứng không báo lỗi.
+        this.bgmWatchdog = setInterval(() => {
+            if (this.bgmAudio !== audio || !this.bgmWanted) return;
+            if (audio.ended) {
+                this.playNextBgmTrack();
+            } else if (audio.currentTime !== this.bgmLastTime) {
+                this.bgmLastTime = audio.currentTime;
+                this.bgmLastProgress = Date.now();
+            } else if (!this.bgmRetryTimer && Date.now() - this.bgmLastProgress >= 45000) {
+                this.onBgmTrackFailed();
+            }
+        }, 5000);
 
-        this.bgmAudio.play().catch((err: unknown) => {
+        audio.play().catch((err: unknown) => {
+            if (this.bgmAudio !== audio || !this.bgmWanted) return;
             const name = (err as { name?: string } | null)?.name;
             if (name === 'NotAllowedError') {
                 // Trình duyệt chặn tự phát: thử lại khi có tương tác hoặc sau ít giây (OBS / LIVE Studio)
                 console.log('[SoundManager] Trình duyệt tạm chặn tự phát nhạc nền, sẽ thử lại');
                 this.scheduleBgmRetry();
+            } else if (name !== 'AbortError') {
+                this.onBgmTrackFailed();
             }
             // File hỏng/thiếu: sự kiện 'error' của thẻ audio sẽ tự chuyển bài
         });
@@ -492,10 +574,11 @@ class SoundManager {
     }
 
     private onBgmTrackFailed(): void {
+        if (!this.bgmWanted) return;
         this.bgmFailures++;
         if (this.bgmFailures >= this.bgmPlaylist.length) {
             console.warn('[SoundManager] Không phát được bài nhạc nền nào trong client/public/music/');
-            this.setBgmPlaying(false);
+            this.stopBgm();
             return;
         }
         this.currentBgmIndex = (this.currentBgmIndex + 1) % this.bgmPlaylist.length;
@@ -520,7 +603,7 @@ class SoundManager {
     }
 
     private playNextBgmTrack(): void {
-        if (this.bgmPlaylist.length === 0) return;
+        if (!this.bgmWanted || this.bgmPlaylist.length === 0) return;
         this.currentBgmIndex = (this.currentBgmIndex + 1) % this.bgmPlaylist.length;
         this.playCurrentBgmTrack();
     }
@@ -530,7 +613,11 @@ class SoundManager {
     // =========================================================================
 
     public setSfxVolume(vol: number): void {
-        this.sfxVolume = Math.max(0, Math.min(1, vol));
+        const next = Math.max(0, Math.min(1, vol));
+        if (Math.abs(this.sfxVolume - next) > 0.001) {
+            this.sfxVolume = next;
+            this.notifyListeners();
+        }
     }
 
     public getSfxVolume(): number {
@@ -538,9 +625,13 @@ class SoundManager {
     }
 
     public setBgmVolume(vol: number): void {
-        this.bgmVolume = Math.max(0, Math.min(1, vol));
-        if (this.bgmAudio && !this.isMuted) {
-            this.bgmAudio.volume = this.bgmVolume;
+        const next = Math.max(0, Math.min(1, vol));
+        if (Math.abs(this.bgmVolume - next) > 0.001) {
+            this.bgmVolume = next;
+            if (this.bgmAudio && !this.isMuted) {
+                this.bgmAudio.volume = this.bgmVolume;
+            }
+            this.notifyListeners();
         }
     }
 
@@ -550,12 +641,15 @@ class SoundManager {
 
     /** Đặt trạng thái tắt tiếng (gọi nhiều lần vẫn cho cùng kết quả). */
     public setMuted(muted: boolean): void {
-        this.isMuted = muted;
-        if (this.bgmAudio) {
-            this.bgmAudio.volume = muted ? 0 : this.bgmVolume;
-        }
-        if (muted && this.isPrintingSoundActive) {
-            this.stopPrintSound();
+        if (this.isMuted !== muted) {
+            this.isMuted = muted;
+            if (this.bgmAudio) {
+                this.bgmAudio.volume = muted ? 0 : this.bgmVolume;
+            }
+            if (muted && this.isPrintingSoundActive) {
+                this.stopPrintSound();
+            }
+            this.notifyListeners();
         }
     }
 

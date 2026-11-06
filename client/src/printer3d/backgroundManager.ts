@@ -47,14 +47,78 @@ export const VIDEO_PRESETS: VideoPreset[] = [
     },
 ];
 
-export const BACKGROUND_PRESETS: BackgroundPreset[] = [
-    {
-        id: 'mountain-mist',
-        name: 'Thung Lũng Mây (tách từ vd1)',
-        url: '/backgrounds/mountain-mist.jpg',
-        badge: '🌄 THUNG LŨNG MÂY',
-    },
-];
+// Tự động quét toàn bộ ảnh nền trong thư mục public/backgrounds/ (chỉ quét lần đầu khi nạp)
+const rawBgImages = import.meta.glob<string>(
+    '../../public/backgrounds/*.{png,jpg,jpeg,webp,gif,svg}',
+    { eager: true, query: '?url', import: 'default' }
+);
+
+function buildBackgroundPresets(): BackgroundPreset[] {
+    const list: BackgroundPreset[] = [];
+
+    // Sắp xếp: mountain-mist luôn lên đầu (Cảnh 1), tiếp theo theo thứ tự tên file tự nhiên (nen2, nen3, ...)
+    const sortedKeys = Object.keys(rawBgImages).sort((a, b) => {
+        if (a.includes('mountain-mist')) return -1;
+        if (b.includes('mountain-mist')) return 1;
+        return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+    });
+
+    let index = 1;
+    for (const pathKey of sortedKeys) {
+        const fileName = pathKey.split('/').pop() || `bg-${index}`;
+        const baseName = fileName.replace(/\.[^/.]+$/, '');
+        const id = baseName;
+
+        // Tên hiển thị gọn gàng (1, 2, 3... hoặc tên file)
+        const name = baseName === 'mountain-mist' 
+            ? 'Thung Lũng Mây' 
+            : `Cảnh ${index} (${fileName})`;
+        const badge = baseName === 'mountain-mist' 
+            ? '🌄 THUNG LŨNG MÂY' 
+            : `🌄 CẢNH ${index}`;
+
+        // Đường dẫn chuẩn từ public: /backgrounds/fileName
+        const url = `/backgrounds/${fileName}`;
+
+        list.push({ id, name, url, badge });
+        index++;
+    }
+
+    if (list.length === 0) {
+        list.push({
+            id: 'mountain-mist',
+            name: 'Thung Lũng Mây',
+            url: '/backgrounds/mountain-mist.jpg',
+            badge: '🌄 THUNG LŨNG MÂY',
+        });
+    }
+
+    return list;
+}
+
+export const BACKGROUND_PRESETS: BackgroundPreset[] = buildBackgroundPresets();
+
+// Quét thêm ảnh mới từ backend (chỉ chạy 1 lần lúc nạp trang đầu tiên để đồng bộ ngay cả khi chưa rebuild)
+let syncDone = false;
+export async function syncBackgroundsFromServer(serverUrl = ''): Promise<BackgroundPreset[]> {
+    if (syncDone) return BACKGROUND_PRESETS;
+    syncDone = true;
+    try {
+        const res = await fetch(`${serverUrl}/api/backgrounds`);
+        if (!res.ok) return BACKGROUND_PRESETS;
+        const list = (await res.json()) as BackgroundPreset[];
+        if (Array.isArray(list)) {
+            for (const item of list) {
+                if (!BACKGROUND_PRESETS.some((p) => p.id === item.id)) {
+                    BACKGROUND_PRESETS.push(item);
+                }
+            }
+        }
+    } catch {
+        // bỏ qua nếu offline hoặc server chưa bật
+    }
+    return BACKGROUND_PRESETS;
+}
 
 let availableVideosPromise: Promise<string[]> | null = null;
 

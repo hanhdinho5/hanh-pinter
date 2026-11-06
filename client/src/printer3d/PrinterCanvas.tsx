@@ -1,7 +1,6 @@
 import { useEffect, useRef, useImperativeHandle, forwardRef, useState } from 'react';
 import { PrinterWorkshopScene } from './PrinterWorkshopScene';
 import type { Sheet, SheetEntry, PrinterStatus } from '../types';
-import { api } from '../socket/socketClient';
 
 export interface PrinterCanvasHandle {
     printSlot: (entry: SheetEntry, durationSeconds?: number, onComplete?: () => void) => void;
@@ -181,55 +180,30 @@ export const PrinterCanvas = forwardRef<PrinterCanvasHandle, PrinterCanvasProps>
     }
 );
 
-/** Đọc ngưỡng xu của khung vàng / VIP từ server (đổi trong trang admin thì tối đa 30s sau badge cập nhật) */
-function useGiftThresholds(): { gold: number; vip: number } {
-    const [t, setT] = useState({ gold: 100, vip: 1000 });
-    useEffect(() => {
-        let alive = true;
-        const load = () =>
-            api
-                .getGiftConfig()
-                .then((c) => {
-                    if (alive && c?.goldDiamonds && c?.fullPageDiamonds) setT({ gold: c.goldDiamonds, vip: c.fullPageDiamonds });
-                })
-                .catch(() => undefined);
-        void load();
-        const id = window.setInterval(load, 30_000);
-        return () => {
-            alive = false;
-            window.clearInterval(id);
-        };
-    }, []);
-    return t;
-}
-
-const fmtXu = (n: number) => `${n.toLocaleString('vi-VN')} xu`;
-
 /**
  * Dải hướng dẫn cho người xem: làm gì -> được in thế nào.
- * Icon dùng emoji gần giống quà TikTok tương ứng: 🌹 Hoa hồng (1 xu), 🎊 Pháo giấy (100 xu), 🌌 Thiên hà (1.000 xu).
+ * Hai ngưỡng cuối dùng ảnh biểu tượng quà từ mẫu người dùng cung cấp.
  */
 function ActionBadges({ frameWidth }: { frameWidth: number }) {
-    const { gold, vip } = useGiftThresholds();
     const badges = [
         { icon: '💬', title: 'Bình luận', sub: 'In ảnh', color: '#7dd3fc' },
         { icon: '➕', title: 'Follow', sub: 'In ảnh', color: '#86efac' },
-        { icon: '🌹', title: 'Tặng quà', sub: 'In ưu tiên', color: '#fda4af' },
-        { icon: '🎊', title: `Từ ${fmtXu(gold)}`, sub: 'Khung vàng', color: '#fcd34d' },
-        { icon: '🌌', title: `Từ ${fmtXu(vip)}`, sub: 'Khung VIP 👑', color: '#f0abfc' },
+        { icon: '🌹', title: '', sub: 'In khung', color: '#fda4af' },
+        { icon: '', giftIcon: 'pig', title: '', sub: 'Khung vàng', color: '#fcd34d' },
+        { icon: '', giftIcon: 'donut', title: '', sub: 'Khung VIP', color: '#f0abfc' },
     ];
-    // Khung 9:16 rộng ~540px -> chữ ~10px; khung OBS 1080px -> ~20px
-    const fontSize = Math.max(8, Math.min(20, frameWidth * 0.019));
+    // Thu gọn dải hướng dẫn, vẫn tăng theo kích thước nguồn overlay.
+    const fontSize = Math.max(7, Math.min(18, frameWidth * 0.017));
     return (
         <div
             style={{
                 position: 'absolute',
                 top: `${fontSize * 1.4}px`,
-                left: 0,
-                right: 0,
+                left: '4%',
+                right: '4%',
                 zIndex: 20,
-                display: 'flex',
-                justifyContent: 'center',
+                display: 'grid',
+                gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
                 gap: `${fontSize * 0.45}px`,
                 padding: `0 ${fontSize * 0.8}px`,
                 pointerEvents: 'none',
@@ -238,23 +212,36 @@ function ActionBadges({ frameWidth }: { frameWidth: number }) {
         >
             {badges.map((b) => (
                 <div
-                    key={b.title}
+                    key={b.title || b.sub}
                     style={{
                         display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'center',
                         alignItems: 'center',
+                        minWidth: 0,
                         gap: `${fontSize * 0.4}px`,
                         padding: `${fontSize * 0.35}px ${fontSize * 0.65}px`,
-                        borderRadius: `${fontSize * 0.9}px`,
-                        background: 'rgba(15, 23, 42, 0.6)',
-                        border: `1px solid ${b.color}77`,
-                        backdropFilter: 'blur(6px)',
                         whiteSpace: 'nowrap',
                         textShadow: '0 1px 2px rgba(0,0,0,0.5)',
                     }}
                 >
-                    <span style={{ fontSize: `${fontSize * 1.7}px`, lineHeight: 1 }}>{b.icon}</span>
-                    <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15 }}>
-                        <span style={{ color: '#f8fafc', fontSize: `${fontSize}px`, fontWeight: 700 }}>{b.title}</span>
+                    {b.giftIcon ? (
+                        <span role="img" aria-label={b.giftIcon === 'pig' ? 'Chú heo may mắn' : 'Bánh vòng'}
+                            style={{
+                                display: 'inline-block',
+                                width: `${fontSize * 3.8}px`,
+                                height: `${fontSize * 3.8}px`,
+                                flexShrink: 0,
+                                backgroundImage: 'url(/gifts/tiktok-gift-icons.png)',
+                                backgroundSize: '200% 100%',
+                                backgroundPosition: b.giftIcon === 'pig' ? 'left center' : 'right center',
+                                backgroundRepeat: 'no-repeat',
+                            }} />
+                    ) : (
+                        <span style={{ fontSize: `${fontSize * 2.7}px`, height: `${fontSize * 3.8}px`, display: 'flex', alignItems: 'center', lineHeight: 1 }}>{b.icon}</span>
+                    )}
+                    <span style={{ display: 'flex', flexDirection: 'column', textAlign: 'center', lineHeight: 1.15 }}>
+                        {b.title && <span style={{ color: '#f8fafc', fontSize: `${fontSize}px`, fontWeight: 700 }}>{b.title}</span>}
                         <span style={{ color: b.color, fontSize: `${fontSize * 0.92}px`, fontWeight: 800 }}>{b.sub}</span>
                     </span>
                 </div>

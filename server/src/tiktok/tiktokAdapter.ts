@@ -53,8 +53,9 @@ export const extractUser = (data: unknown): { userId: string; username: string }
     const user = d['user'] as Record<string, unknown> | undefined;
 
     const rawId = d['userId'] ?? user?.['userId'] ?? user?.['id'] ?? user?.['uniqueId'] ?? d['uniqueId'] ?? 'anonymous';
-    const rawName =
-        user?.['uniqueId'] ?? user?.['displayId'] ?? d['uniqueId'] ?? user?.['nickname'] ?? d['nickname'] ?? 'Viewer';
+    // In tên hiển thị trên hồ sơ; ID tài khoản vẫn dùng riêng để tính lượt/chống trùng.
+    const rawName = [user?.['nickname'], d['nickname'], user?.['uniqueId'], user?.['displayId'], d['uniqueId']]
+        .find((name) => typeof name === 'string' && name.trim().length > 0) ?? 'Viewer';
 
     return {
         userId: String(rawId),

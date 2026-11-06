@@ -1,4 +1,5 @@
 import { io, type Socket } from 'socket.io-client';
+import { getRandomAvatarUrl } from '../printer3d/avatarManager';
 import type { RealtimeEventMap, ViewerEvent, BackgroundConfig, AudioConfig } from '../types';
 
 export type TypedSocket = Socket<RealtimeEventMap>;
@@ -61,6 +62,7 @@ export const api = {
             body: JSON.stringify({
                 userId: `user-${username}-${Date.now()}`,
                 username,
+                avatarUrl: getRandomAvatarUrl(),
             }),
         });
         return parse(res);
@@ -72,6 +74,7 @@ export const api = {
             body: JSON.stringify({
                 userId: `user-${username}-${Date.now()}`,
                 username,
+                avatarUrl: getRandomAvatarUrl(),
             }),
         });
         return parse(res);
@@ -88,6 +91,7 @@ export const api = {
             body: JSON.stringify({
                 userId: `user-${username}-${Date.now()}`,
                 username,
+                avatarUrl: getRandomAvatarUrl(),
                 giftId: `gift-${giftName.toLowerCase()}`,
                 giftName,
                 giftCount: 1,
@@ -136,6 +140,10 @@ export const api = {
         const res = await fetch(`${serverUrl}/api/tiktok/status`);
         return parse(res);
     },
+    async getBackgrounds(serverUrl = DEFAULT_SERVER_URL) {
+        const res = await fetch(`${serverUrl}/api/backgrounds`);
+        return parse(res) as Promise<Array<{ id: string; name: string; url: string; badge: string }>>;
+    },
     async getBackgroundConfig(serverUrl = DEFAULT_SERVER_URL) {
         const res = await fetch(`${serverUrl}/api/config/background`);
         return parse(res) as Promise<BackgroundConfig>;
@@ -157,6 +165,13 @@ export const api = {
     async nextBgmTrack(serverUrl = DEFAULT_SERVER_URL) {
         const res = await fetch(`${serverUrl}/api/audio/next`, { method: 'POST' });
         if (!res.ok) throw new Error('Lỗi chuyển bài');
+    },
+    updateAudioRealtime(patch: Partial<AudioConfig>) {
+        const socket = getSocket();
+        if (socket?.connected) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (socket as any).emit('audio:update', patch);
+        }
     },
     async setAudioConfig(patch: Partial<AudioConfig>, serverUrl = DEFAULT_SERVER_URL) {
         const res = await fetch(`${serverUrl}/api/config/audio`, {

@@ -2,10 +2,41 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createCore } from './app.js';
 import { config, type AppConfig } from './config.js';
+import { classifyEvent, normalizeEvent } from './events/eventHandler.js';
 
 const fast: AppConfig = { ...config, printer: { ...config.printer, basePrintMs: 5 } };
 
 const comment = (userId: string) => ({ type: 'COMMENT' as const, userId, username: userId });
+
+test('Hoa hồng có khung riêng; đạt ngưỡng vẫn nâng lên vàng/VIP', () => {
+    const rose = normalizeEvent({ type: 'GIFT', userId: 'r', username: 'r', giftId: '5655', diamondCount: 1 });
+    const off = { ...config.gift, goldDiamonds: 100, fullPageDiamonds: 1000 };
+    const on = off;
+    assert.equal(classifyEvent(rose, off).frame, 'rose');
+    assert.equal(classifyEvent(rose, on).frame, 'rose');
+    assert.equal(classifyEvent({ ...rose, giftId: 'other', giftName: 'Rose' }, on).frame, 'rose');
+    assert.equal(classifyEvent({ ...rose, giftId: 'other', giftName: 'Hoa hồng' }, on).frame, 'rose');
+    assert.equal(classifyEvent({ ...rose, giftId: 'other', giftName: 'Heart' }, on).frame, 'normal');
+    assert.equal(classifyEvent({ ...rose, giftCount: 1000 }, on).frame, 'vip');
+    assert.equal(classifyEvent({ ...rose, giftCount: 100 }, off).frame, 'gold');
+    assert.equal(classifyEvent({ ...rose, type: 'COMMENT' }, on).frame, 'normal');
+});
+
+test('Hoa hồng khung nhỏ chỉ chiếm một ô, bốn lượt đủ một tờ', async () => {
+    const { handler, engine, bus } = createCore(fast);
+    const slots: number[] = [];
+    bus.on('printer:job:started', (job) => {
+        slots.push(job.slot!);
+        assert.equal(job.frame, 'rose');
+    });
+    const entries: { frame: string; isWide?: boolean }[] = [];
+    bus.on('printer:sheet:completed', (sheet) => entries.push(...sheet.entries));
+    for (let i = 0; i < 4; i++) handler.handle({ type: 'GIFT', userId: 'rose-user', username: 'rose-user', giftId: '5655', diamondCount: 1 });
+    await engine.idle();
+    assert.deepEqual(slots, [0, 1, 2, 3]);
+    assert.equal(entries.length, 4);
+    assert.ok(entries.every((entry) => entry.frame === 'rose' && entry.isWide === false));
+});
 
 test('comment/follow được xử lý tuần tự, đủ 4 ảnh thì sang tờ mới', async () => {
     const { handler, engine, sheets, bus } = createCore(fast);
@@ -30,12 +61,13 @@ test('comment/follow được xử lý tuần tự, đủ 4 ảnh thì sang tờ
     assert.equal(sheets.current.entries.length, 1);
 });
 
-test('chống trùng user trên cùng tờ (kể cả đang chờ trong queue)', async () => {
+test('follow vẫn chống trùng trên cùng tờ và trong queue; quà không bị chặn', async () => {
     const { handler, engine, sheets } = createCore(fast);
-    assert.equal(handler.handle(comment('a')).accepted, true);
-    assert.equal(handler.handle(comment('a')).accepted, false); // trong queue/đang in
+    const follow = { ...comment('a'), type: 'FOLLOW' as const };
+    assert.equal(handler.handle(follow).accepted, true);
+    assert.equal(handler.handle(follow).accepted, false); // trong queue/đang in
     await engine.idle();
-    assert.equal(handler.handle(comment('a')).accepted, false); // đã có trên tờ
+    assert.equal(handler.handle(follow).accepted, false); // đã có trên tờ
     assert.equal(sheets.current.entries.length, 1);
     // gift vẫn được in dù đã có trên tờ
     const g = handler.handle({ type: 'GIFT', userId: 'a', username: 'a', giftName: 'Rose', diamondCount: 1 });
@@ -57,7 +89,7 @@ test('gift được ưu tiên, khung vàng, in nguyên trang', async () => {
     await engine.idle();
 
     assert.deepEqual(started, ['c1', 'r', 'g', 'b', 'c2']);
-    assert.ok(rose.accepted && rose.job.frame === 'normal' && rose.job.lane === 'priority');
+    assert.ok(rose.accepted && rose.job.frame === 'rose' && rose.job.lane === 'priority');
     assert.ok(gold.accepted && gold.job.frame === 'gold');
     assert.ok(big.accepted && big.job.frame === 'vip' && big.job.kind === 'single');
     // c1, r (hàng 0) + g (hàng 1) -> đủ tờ; b (VIP) hàng 0 tờ mới, c2 hàng 1
@@ -135,18 +167,39 @@ test('đổi tờ TRƯỚC khi bắt đầu in (client vẽ đúng tờ, đúng 
     assert.equal(sheets.current.entries.length, 0);
 });
 
-test('mỗi người chỉ được in miễn phí 1 lần trong thời gian chờ, quà vẫn luôn được in', async () => {
-    const { handler, engine } = createCore({ ...fast, queue: { ...fast.queue, freeCooldownMinutes: 10 } });
+test('5 comment được in, chặn lượt 6; đúng 5 phút sau cấp lại 5 lượt', (t) => {
+    t.mock.timers.enable({ apis: ['Date'] });
+    const { handler, engine } = createCore(fast);
+    engine.pause();
+    for (let i = 0; i < 4; i++) assert.equal(handler.handle(comment('u1')).accepted, true);
+    t.mock.timers.tick(60000);
     assert.equal(handler.handle(comment('u1')).accepted, true);
-    await engine.idle();
-    // sang tờ khác vẫn bị chặn vì còn trong thời gian chờ
-    for (let i = 0; i < 4; i++) handler.handle(comment(`x${i}`));
-    await engine.idle();
-    const again = handler.handle(comment('u1'));
-    assert.equal(again.accepted, false);
+    assert.equal(handler.handle(comment('u1')).accepted, false);
+    assert.equal(handler.handle(comment('u2')).accepted, true);
     const gift = handler.handle({ type: 'GIFT', userId: 'u1', username: 'u1', diamondCount: 1, giftCount: 1 });
     assert.equal(gift.accepted, true);
+    t.mock.timers.tick(299999);
+    assert.equal(handler.handle(comment('u1')).accepted, false);
+    t.mock.timers.tick(1);
+    for (let i = 0; i < 5; i++) assert.equal(handler.handle(comment('u1')).accepted, true);
+    assert.equal(handler.handle(comment('u1')).accepted, false);
+});
+
+test('comment bị từ chối vì queue đầy không tiêu hao lượt', async () => {
+    const { handler, engine } = createCore({ ...fast, queue: { ...fast.queue, maxFree: 1 } });
+    engine.pause();
+    assert.equal(handler.handle(comment('other')).accepted, true);
+    for (let i = 0; i < 6; i++) {
+        const result = handler.handle(comment('u'));
+        assert.ok(!result.accepted && result.reason === 'queue_full');
+    }
+    engine.resume();
     await engine.idle();
+    for (let i = 0; i < 5; i++) {
+        assert.equal(handler.handle(comment('u')).accepted, true);
+        await engine.idle();
+    }
+    assert.equal(handler.handle(comment('u')).accepted, false);
 });
 
 test('quà thường không chiếm hết lượt: cứ 3 quà thì nhường 1 comment', async () => {

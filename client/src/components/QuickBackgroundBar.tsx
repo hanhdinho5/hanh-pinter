@@ -261,7 +261,7 @@ export function QuickBackgroundBar({
 
                     {/* NỘI DUNG TAB ẢNH TĨNH */}
                     {activeTab === 'image' && (
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '6px' }}>
                             {BACKGROUND_PRESETS.map((p) => {
                                 const active = currentPresetId === p.id;
                                 return (

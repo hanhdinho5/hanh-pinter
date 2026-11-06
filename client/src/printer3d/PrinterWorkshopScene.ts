@@ -590,8 +590,7 @@ export class PrinterWorkshopScene {
 
         this.setPrinterStatus('printing');
 
-        // Bật âm thanh máy in (âm motor bước + kim nhiệt)
-        soundManager.startPrintSound(entry.frame !== 'normal');
+        // Tiếng cọ được bật trong updatePrintAnimation khi cây bút thực sự vẽ.
 
         // Cài đặt màu đèn đầu in phù hợp với khung
         if (entry.frame !== 'normal') {
@@ -626,7 +625,6 @@ export class PrinterWorkshopScene {
         this.onPrintCompleteCallback = onComplete ?? null;
 
         this.setPrinterStatus('printing');
-        soundManager.startPrintSound(true);
 
         this.printHeadLight.color.setHex(0xf59e0b);
         this.printHeadLight.intensity = 7.0;
@@ -786,8 +784,11 @@ export class PrinterWorkshopScene {
      */
     private updatePrintAnimation(delta: number, time: number): void {
         if (!this.isPrintingActive || this.activeSlot === null || !this.activeEntry || !this.currentSheet) {
+            soundManager.stopPrintSound();
             return;
         }
+
+        soundManager.keepPrintSoundAlive(this.activeEntry.frame !== 'normal');
 
         this.printElapsedTime += delta;
         this.printProgress = Math.min(1.0, this.printElapsedTime / this.printDuration);
@@ -811,7 +812,7 @@ export class PrinterWorkshopScene {
         }
 
         const isSpecial = this.currentSheet.kind === 'special';
-        const isWide = Boolean(this.activeEntry.isWide || this.activeEntry.frame !== 'normal');
+        const isWide = this.activeEntry.isWide ?? (this.activeEntry.frame === 'gold' || this.activeEntry.frame === 'vip');
         const targets = this.getSlotPrintheadTargets(this.activeSlot, this.printProgress, isSpecial, isWide);
 
         // 1. Chuyển động cây bút dọc theo trục Z bám sát scanline từ trên xuống dưới
@@ -845,14 +846,14 @@ export class PrinterWorkshopScene {
                 // VIP: chuông + pháo hoa ánh kim lớn ngay tại avatar
                 soundManager.playGoldChime();
                 this.particles.burstGrandCelebration(this.getSlotWorldPosition(this.activeSlot, true));
-            } else if (this.activeEntry.frame === 'gold' || isWide) {
+            } else if (this.activeEntry.frame === 'gold' || this.activeEntry.frame === 'rose' || isWide) {
                 soundManager.playGoldChime();
                 const burstPos = this.getSlotWorldPosition(this.activeSlot, isWide);
                 this.particles.burstGoldSparkles(burstPos, 65);
             }
 
             // Ghi avatar vừa in vào tờ hiện tại để các lần vẽ lại sau vẫn còn nó
-            const done: SheetEntry = { ...this.activeEntry, isWide: this.activeEntry.isWide ?? this.activeEntry.frame !== 'normal' };
+            const done: SheetEntry = { ...this.activeEntry, isWide: this.activeEntry.isWide ?? (this.activeEntry.frame === 'gold' || this.activeEntry.frame === 'vip') };
             if (this.currentSheet.kind !== 'special' && !this.currentSheet.entries.some((e) => e.slot === done.slot)) {
                 this.currentSheet = {
                     ...this.currentSheet,

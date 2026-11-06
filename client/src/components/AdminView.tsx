@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { api, DEFAULT_SERVER_URL } from '../socket/socketClient';
 import { usePrinterSocket } from '../socket/usePrinterSocket';
 import { soundManager } from '../audio/SoundManager';
-import { BACKGROUND_PRESETS } from '../printer3d/backgroundManager';
+import { fallbackAvatarUrl } from '../printer3d/avatarManager';
+import { pickTestName } from '../printer3d/testNames';
+import { BACKGROUND_PRESETS, syncBackgroundsFromServer } from '../printer3d/backgroundManager';
 import type { BackgroundConfig } from '../types';
 
 const STATUS_LABEL = {
@@ -44,14 +46,14 @@ const sim = async (body: Record<string, unknown>) => {
     const res = await fetch(`${DEFAULT_SERVER_URL}/api/dev/tiktok/simulate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...body, avatarUrl: fallbackAvatarUrl(String(body.uniqueId ?? 'test')) }),
     });
     if (!res.ok) {
         const b = (await res.json().catch(() => null)) as { error?: string } | null;
         throw new Error(b?.error ?? `Lỗi server (${res.status})`);
     }
 };
-const rid = () => `viewer${Math.floor(Math.random() * 9999)}`;
+const rid = pickTestName;
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export function AdminView() {
@@ -92,6 +94,21 @@ export function AdminView() {
     const [showButterflies, setShowButterflies] = useState(true);
     const [showBirds, setShowBirds] = useState(true);
     const [bgMsg, setBgMsg] = useState('');
+    const [presets, setPresets] = useState(BACKGROUND_PRESETS);
+
+    // Đồng bộ danh sách ảnh nền tự động quét từ thư mục public/backgrounds/
+    useEffect(() => {
+        syncBackgroundsFromServer().then((list) => {
+            if (list) setPresets([...list]);
+        }).catch(() => undefined);
+
+        return soundManager.subscribe(() => {
+            setSfxVol(Math.round(soundManager.getSfxVolume() * 100));
+            setBgmVol(Math.round(soundManager.getBgmVolume() * 100));
+            setMuted(soundManager.isSoundMuted());
+            setBgmPlaying(soundManager.getBgmPlaying());
+        });
+    }, []);
 
     // Tải cài đặt từ server: lúc mở trang và MỖI LẦN kết nối lại (server vừa khởi động lại)
     useEffect(() => {
@@ -264,6 +281,7 @@ export function AdminView() {
 
                 <section style={card}>
                     <h2 style={{ margin: 0, fontSize: 16 }}>Ngưỡng quà (kim cương)</h2>
+                    <div style={{ fontSize: 12, color: '#94a3b8' }}>Hoa hồng dùng khung nhỏ viền hồng riêng; đủ ngưỡng bên dưới sẽ nâng lên khung vàng/VIP.</div>
                     <label style={{ fontSize: 13 }}>Khung vàng từ <input style={{ ...input, width: 90 }} type="number" min={1} value={gold} onChange={(e) => setGold(Number(e.target.value))} /></label>
                     <label style={{ fontSize: 13 }}>Khung VIP vương miện từ <input style={{ ...input, width: 90 }} type="number" min={2} value={full} onChange={(e) => setFull(Number(e.target.value))} /></label>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -328,6 +346,7 @@ export function AdminView() {
                                 const v = Number(e.target.value);
                                 setBgmVol(v);
                                 soundManager.setBgmVolume(v / 100);
+                                api.updateAudioRealtime({ bgmVolume: v / 100 });
                                 saveAudio({ bgmVolume: v / 100 });
                             }}
                         />
@@ -344,6 +363,7 @@ export function AdminView() {
                                 const v = Number(e.target.value);
                                 setSfxVol(v);
                                 soundManager.setSfxVolume(v / 100);
+                                api.updateAudioRealtime({ sfxVolume: v / 100 });
                                 saveAudio({ sfxVolume: v / 100 });
                             }}
                         />
@@ -393,7 +413,7 @@ export function AdminView() {
 
                     <div style={{ fontSize: 13, color: '#94a3b8' }}>Chọn cảnh nền (áp dụng ngay & đồng bộ OBS):</div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 6 }}>
-                        {BACKGROUND_PRESETS.map((p) => {
+                        {presets.map((p) => {
                             const active = bgPreset === p.id;
                             return (
                                 <button
@@ -483,15 +503,17 @@ export function AdminView() {
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                         <button style={btn('#7c3aed')} onClick={() => run(sim({ kind: 'chat', uniqueId: rid() }))}>Chat</button>
                         <button style={btn('#7c3aed')} onClick={() => run(sim({ kind: 'follow', uniqueId: rid() }))}>Follow</button>
+                        <button style={btn('#be185d')} onClick={() => run(sim({ kind: 'gift', uniqueId: rid(), giftId: 5655, giftName: 'Rose', diamondCount: 1, repeatCount: 1, streakable: true, repeatEnd: true }))}>🌹 Hoa hồng ×1</button>
                         <button style={btn('#7c3aed')} onClick={() => run((async () => { for (let i = 0; i < 10; i++) { await sim({ kind: 'chat', uniqueId: rid() }); await delay(150); } })())}>10 người chat</button>
                         <button style={btn('#7c3aed')} onClick={() => run(sim({ kind: 'gift', uniqueId: rid(), giftName: 'Galaxy', diamondCount: 1000 }))}>Quà 1000💎</button>
                         <button style={btn('#7c3aed')} onClick={() => run((async () => { const u = rid(); for (let n = 20; n <= 100; n += 20) { await sim({ kind: 'gift', uniqueId: u, giftName: 'Rose', diamondCount: 1, streakable: true, repeatCount: n }); await delay(400); } await sim({ kind: 'gift', uniqueId: u, giftName: 'Rose', diamondCount: 1, streakable: true, repeatCount: 100, repeatEnd: true }); })())}>Combo Rose ×100</button>
                     </div>
                     <div style={{ fontSize: 12, color: '#64748b' }}>Thử nhanh (bỏ qua adapter):</div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        <button style={btn('#334155')} onClick={() => run(api.sendMockComment(`test${Math.floor(Math.random() * 999)}`))}>Comment</button>
-                        <button style={btn('#334155')} onClick={() => run(api.sendMockGift(`vip${Math.floor(Math.random() * 999)}`, 'Rose', gold))}>Quà vàng</button>
-                        <button style={btn('#334155')} onClick={() => run(api.sendMockGift(`vip${Math.floor(Math.random() * 999)}`, 'Lion', full))}>Quà VIP vương miện</button>
+                        <button style={btn('#334155')} onClick={() => run(api.sendMockComment(rid()))}>Comment</button>
+                        <button style={btn('#be185d')} onClick={() => run(api.sendMockGift(rid(), 'Rose', 1))}>🌹 Hoa hồng</button>
+                        <button style={btn('#334155')} onClick={() => run(api.sendMockGift(rid(), 'Rose', gold))}>Quà vàng</button>
+                        <button style={btn('#334155')} onClick={() => run(api.sendMockGift(rid(), 'Lion', full))}>Quà VIP vương miện</button>
                     </div>
                 </section>
 
