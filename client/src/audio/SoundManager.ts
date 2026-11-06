@@ -9,8 +9,8 @@
  */
 class SoundManager {
     private ctx: AudioContext | null = null;
-    private sfxVolume = 0.6;
-    private bgmVolume = 0.35;
+    private sfxVolume = 1;
+    private bgmVolume = 0.7;
     private isMuted = false;
 
     // Bộ tổng hợp âm thanh bút cọ trên bề mặt giấy (Paper Friction / Sketching Synth)
@@ -60,41 +60,80 @@ class SoundManager {
     // SFX: TIẾNG BÚT CỌ VÀO GIẤY / NÉT VẼ TỰ NHIÊN (PAPER FRICTION & SKETCHING)
     // =========================================================================
 
+    /** File tiếng bút đã giải mã + chuẩn hoá (null = không có file -> dùng âm tổng hợp) */
+    private penBuffer: AudioBuffer | null = null;
+    private penBufferGain = 1;
+    private penBufferLoading: Promise<void> | null = null;
+    private penFileSource: AudioBufferSourceNode | null = null;
+
+    /** Nạp trước file tiếng bút (wav/mp3) qua Web Audio, đo đỉnh để tự khuếch đại lên cho đủ to. */
+    private loadPenBuffer(): Promise<void> {
+        if (this.penBufferLoading) return this.penBufferLoading;
+        const candidates = ['/sounds/paper-friction.wav', '/sounds/paper-friction.mp3', '/sounds/printer-working.mp3'];
+        this.penBufferLoading = (async () => {
+            const ctx = this.getContext();
+            for (const url of candidates) {
+                try {
+                    const res = await fetch(url);
+                    const type = res.headers.get('content-type') ?? '';
+                    if (!res.ok || type.includes('text/html')) continue;
+                    const buf = await ctx.decodeAudioData(await res.arrayBuffer());
+                    let peak = 0;
+                    for (let c = 0; c < buf.numberOfChannels; c++) {
+                        const d = buf.getChannelData(c);
+                        for (let i = 0; i < d.length; i++) peak = Math.max(peak, Math.abs(d[i]));
+                    }
+                    // Chuẩn hoá về đỉnh ~0.9 (file thu âm gốc rất nhỏ)
+                    this.penBufferGain = peak > 0 ? Math.min(12, 0.9 / peak) : 1;
+                    this.penBuffer = buf;
+                    return;
+                } catch {
+                    // thử file kế tiếp
+                }
+            }
+        })();
+        return this.penBufferLoading;
+    }
+
     /**
      * Bật âm thanh nét bút / cọ ma sát trên bề mặt giấy (Paper Friction / Sketching sound)
      */
     public startPrintSound(isGold = false): void {
         if (this.isMuted || this.isPrintingSoundActive) return;
-
-        // Thử phát file mp3 nếu người dùng đã bỏ file thu âm vào client/public/sounds/
-        // Ưu tiên paper-friction.mp3, kế đến là printer-working.mp3
-        const tryPlayFile = (path: string, fallback: () => void) => {
-            const customAudio = new Audio(path);
-            customAudio.volume = this.sfxVolume;
-            customAudio.loop = true;
-
-            const playPromise = customAudio.play();
-            if (playPromise) {
-                playPromise
-                    .then(() => {
-                        this.isPrintingSoundActive = true;
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        (this as any)._customPrintAudio = customAudio;
-                    })
-                    .catch(() => {
-                        fallback();
-                    });
-            } else {
-                fallback();
-            }
-        };
-
-        tryPlayFile('/sounds/paper-friction.mp3', () => {
-            tryPlayFile('/sounds/printer-working.mp3', () => {
-                // Nếu chưa có file mp3 thì dùng bộ tổng hợp âm thanh Web Audio API mô phỏng tiếng ngòi bút ma sát trên thớ giấy
-                this.startSynthesizedPrintSound(isGold);
-            });
+        this.isPrintingSoundActive = true;
+        void this.loadPenBuffer().then(() => {
+            // Lượt in đã kết thúc trong lúc đang nạp file
+            if (!this.isPrintingSoundActive || this.printGainNode) return;
+            if (this.penBuffer) this.startFilePrintSound(isGold);
+            else this.startSynthesizedPrintSound(isGold);
         });
+    }
+
+    /** Phát lặp file tiếng bút thật, mỗi lần bắt đầu ở một vị trí ngẫu nhiên cho đỡ lặp lại. */
+    private startFilePrintSound(isGold: boolean): void {
+        if (!this.penBuffer) return;
+        try {
+            const ctx = this.getContext();
+            const now = ctx.currentTime;
+            const gain = ctx.createGain();
+            const level = this.penBufferGain * (isGold ? 1.0 : 0.9) * this.sfxVolume;
+            gain.gain.setValueAtTime(0, now);
+            gain.gain.linearRampToValueAtTime(level, now + 0.08);
+            gain.connect(ctx.destination);
+
+            const src = ctx.createBufferSource();
+            src.buffer = this.penBuffer;
+            src.loop = true;
+            src.playbackRate.value = 0.94 + Math.random() * 0.12;
+            src.connect(gain);
+            src.start(now, Math.random() * this.penBuffer.duration);
+
+            this.printGainNode = gain;
+            this.penFileSource = src;
+        } catch (err) {
+            console.warn('[SoundManager] Lỗi phát file tiếng bút:', err);
+            this.startSynthesizedPrintSound(isGold);
+        }
     }
 
     /**
@@ -109,7 +148,7 @@ class SoundManager {
             const now = ctx.currentTime;
             const mainGain = ctx.createGain();
             mainGain.gain.setValueAtTime(0, now);
-            mainGain.gain.linearRampToValueAtTime((isGold ? 0.22 : 0.16) * this.sfxVolume, now + 0.12);
+            mainGain.gain.linearRampToValueAtTime((isGold ? 0.75 : 0.6) * this.sfxVolume, now + 0.12);
             mainGain.connect(ctx.destination);
             this.printGainNode = mainGain;
 
@@ -202,33 +241,32 @@ class SoundManager {
     public stopPrintSound(): void {
         this.isPrintingSoundActive = false;
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const customAudio = (this as any)._customPrintAudio as HTMLAudioElement | undefined;
-        if (customAudio) {
-            customAudio.pause();
-            customAudio.currentTime = 0;
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (this as any)._customPrintAudio = null;
-        }
-
         if (this.ctx && this.printGainNode) {
+            const gainNode = this.printGainNode;
+            const lfo = this.paperStrokeLFO;
+            const noise = this.paperNoiseSource;
+            const file = this.penFileSource;
+            this.printGainNode = null;
+            this.paperStrokeLFO = null;
+            this.paperNoiseSource = null;
+            this.penFileSource = null;
+
             const now = this.ctx.currentTime;
-            this.printGainNode.gain.linearRampToValueAtTime(0, now + 0.1);
+            gainNode.gain.cancelScheduledValues(now);
+            gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+            gainNode.gain.linearRampToValueAtTime(0, now + 0.1);
 
             setTimeout(() => {
-                try {
-                    this.paperStrokeLFO?.stop();
-                    this.paperNoiseSource?.stop();
-                    this.paperStrokeLFO?.disconnect();
-                    this.paperNoiseSource?.disconnect();
-                    this.printGainNode?.disconnect();
-                } catch {
-                    // ignore
+                for (const node of [lfo, noise, file]) {
+                    try {
+                        node?.stop();
+                        node?.disconnect();
+                    } catch {
+                        // ignore
+                    }
                 }
-                this.paperStrokeLFO = null;
-                this.paperNoiseSource = null;
-                this.printGainNode = null;
-            }, 120);
+                gainNode.disconnect();
+            }, 150);
         }
     }
 
@@ -277,7 +315,7 @@ class SoundManager {
                 filter.frequency.exponentialRampToValueAtTime(150, now + 0.6);
 
                 const gain = ctx.createGain();
-                gain.gain.setValueAtTime(0.2 * this.sfxVolume, now);
+                gain.gain.setValueAtTime(0.5 * this.sfxVolume, now);
 
                 source.connect(filter);
                 filter.connect(gain);
@@ -303,7 +341,7 @@ class SoundManager {
                 osc.frequency.setValueAtTime(freq, now + idx * 0.08);
 
                 gain.gain.setValueAtTime(0, now + idx * 0.08);
-                gain.gain.linearRampToValueAtTime(0.18 * this.sfxVolume, now + idx * 0.08 + 0.03);
+                gain.gain.linearRampToValueAtTime(0.3 * this.sfxVolume, now + idx * 0.08 + 0.03);
                 gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.08 + 1.2);
 
                 osc.connect(gain);

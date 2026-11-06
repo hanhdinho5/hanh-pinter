@@ -59,8 +59,10 @@ test('gift được ưu tiên, khung vàng, in nguyên trang', async () => {
     assert.deepEqual(started, ['c1', 'r', 'g', 'b', 'c2']);
     assert.ok(rose.accepted && rose.job.frame === 'normal' && rose.job.lane === 'priority');
     assert.ok(gold.accepted && gold.job.frame === 'gold');
-    assert.ok(big.accepted && big.job.kind === 'fullPage');
-    assert.equal(sheets.completedCount, 2); // tờ dở (c1,r,g) + trang đặc biệt
+    assert.ok(big.accepted && big.job.frame === 'vip' && big.job.kind === 'single');
+    // c1, r (hàng 0) + g (hàng 1) -> đủ tờ; b (VIP) hàng 0 tờ mới, c2 hàng 1
+    assert.equal(sheets.completedCount, 1);
+    assert.ok(sheets.current.entries.some((e) => e.userId === 'b' && e.frame === 'vip' && e.isWide));
 });
 
 test('pause/resume: job đang in xong rồi dừng, resume thì chạy tiếp', async () => {
@@ -100,4 +102,35 @@ test('quà to (gold) chiếm nguyên 1 hàng, 2 quà to là đủ 1 tờ', async
 
     assert.deepEqual(completedSheets, [2]); // Tờ đã hoàn tất có 2 quà to chiếm trọn 2 hàng
     assert.equal(sheets.completedCount, 1);
+});
+
+test('đổi tờ TRƯỚC khi bắt đầu in (client vẽ đúng tờ, đúng ô)', async () => {
+    const { handler, engine, sheets, bus } = createCore(fast);
+    const log: string[] = [];
+    bus.on('printer:sheet:completed', (s) => log.push(`completed#${s.id}`));
+    bus.on('printer:sheet', (s) => log.push(`sheet#${s.id}:${s.kind}`));
+    bus.on('printer:job:started', (j) => log.push(`start:${j.userId}@${j.sheetId}/${j.slot}`));
+
+    handler.handle(comment('a')); // hàng 0
+    await engine.idle();
+    handler.handle(comment('b')); // hàng 0
+    handler.handle(comment('c')); // hàng 1 -> 2 hàng đều có người
+    await engine.idle();
+    log.length = 0;
+
+    // Quà vàng cần 1 hàng trống -> tờ 1 phải hoàn tất trước, quà in ở tờ 2 hàng 0
+    handler.handle({ type: 'GIFT', userId: 'g', username: 'g', diamondCount: 150 });
+    await engine.idle();
+    assert.deepEqual(log.slice(0, 3), ['completed#1', 'sheet#2:standard', 'start:g@2/0']);
+    assert.equal(sheets.current.id, 2);
+    assert.ok(sheets.current.entries.some((e) => e.userId === 'g' && e.slot === 0 && e.isWide));
+
+    // VIP: chiếm hàng 1 còn trống của tờ 2 -> đủ tờ -> tờ 2 hoàn tất SAU khi in
+    log.length = 0;
+    handler.handle({ type: 'GIFT', userId: 'v', username: 'v', diamondCount: 1000 });
+    await engine.idle();
+    assert.equal(log[0], 'start:v@2/2');
+    assert.ok(log.includes('completed#2'));
+    assert.equal(sheets.current.id, 3);
+    assert.equal(sheets.current.entries.length, 0);
 });

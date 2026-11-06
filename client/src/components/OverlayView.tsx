@@ -18,7 +18,7 @@ export function OverlayView() {
     });
 
     const isPrintingRef = useRef(false);
-    const [bgMode, setBgMode] = useState<'image' | 'video'>('video');
+    const [bgMode, setBgMode] = useState<'image' | 'video'>('image');
     const [currentVideoId, setCurrentVideoId] = useState('vd1');
 
     // Xử lý tham số URL: ?bgm=1 (tự bật BGM), ?mute=1 (tắt âm), ?vol=50
@@ -59,6 +59,9 @@ export function OverlayView() {
                 username: job.username,
                 avatarUrl: job.avatarUrl,
                 frame: job.frame,
+                // Server xếp quà vàng chiếm nguyên 1 hàng -> client vẽ đúng như vậy ngay từ đầu
+                isWide: job.frame !== 'normal',
+                sheetId: job.sheetId ?? undefined,
             };
 
             if (job.kind === 'fullPage') {
@@ -76,20 +79,19 @@ export function OverlayView() {
             const nextSheet: Sheet = {
                 id: completedSheet.id + 1,
                 kind: 'standard',
-                capacity: 6,
+                capacity: 4,
                 entries: [],
                 completed: false,
             };
 
-            printerRef.current?.ejectSheet(nextSheet, () => {
-                setActiveSheet(nextSheet);
-            });
+            // Tờ mới thật (kể cả trang đặc biệt) do server gửi ngay sau qua onSheetUpdate;
+            // nextSheet ở đây chỉ để tờ bên dưới có sẵn nội dung trong lúc chờ.
+            printerRef.current?.ejectSheet(nextSheet);
         },
         onSheetUpdate: (sheet: Sheet) => {
             // Nếu không đang trong hoạt ảnh quét in thì đồng bộ dữ liệu tĩnh
-            if (!isPrintingRef.current) {
-                setActiveSheet(sheet);
-            }
+            // Scene tự giữ avatar đang/vừa in, nên luôn nhận dữ liệu mới (trước đây bỏ qua khi đang in -> hình trước bị mất)
+            setActiveSheet(sheet);
         },
         onBackgroundSync: (config) => {
             if (printerRef.current) {
@@ -102,7 +104,7 @@ export function OverlayView() {
 
     // Đồng bộ ban đầu khi nhận được snapshot từ backend
     useEffect(() => {
-        if (currentSheet && !isPrintingRef.current) {
+        if (currentSheet) {
             setActiveSheet(currentSheet);
         }
     }, [currentSheet]);
@@ -134,6 +136,7 @@ export function OverlayView() {
 
             {/* Thanh điều khiển chọn Background nhanh (luôn có sẵn để đổi video / ảnh) */}
             <QuickBackgroundBar
+                autoHide
                 currentPresetId={backgroundConfig?.presetId ?? 'mountain-mist'}
                 bgMode={bgMode}
                 onToggleBgMode={(mode) => {
@@ -145,9 +148,11 @@ export function OverlayView() {
                     setCurrentVideoId(videoId);
                     printerRef.current?.setBackgroundVideo(videoId);
                     printerRef.current?.setBackgroundMode('video');
+                    setBgMode('video');
                 }}
                 onUploadCustomVideo={(file) => {
                     printerRef.current?.applyCustomVideo(file);
+                    setBgMode('video');
                 }}
                 onSelectPreset={(presetId) => {
                     printerRef.current?.setBackground(presetId);
@@ -185,8 +190,9 @@ export function OverlayView() {
                 <div
                     style={{
                         position: 'absolute',
-                        top: '16px',
+                        bottom: '16px',
                         left: '16px',
+                        zIndex: 30,
                         padding: '6px 12px',
                         background: 'rgba(239, 68, 68, 0.85)',
                         color: '#ffffff',

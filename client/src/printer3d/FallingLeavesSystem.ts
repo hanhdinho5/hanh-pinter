@@ -1,162 +1,168 @@
 import * as THREE from 'three';
+import { disposeObjectTree, halfExtents, seededRandom, smoothNoise } from './backdrop';
 
-interface LeafInstance {
+interface Leaf {
     mesh: THREE.Mesh;
-    initialX: number;
+    material: THREE.MeshBasicMaterial;
+    depth: number;
+    x: number;
+    y: number;
     fallSpeed: number;
-    swaySpeed: number;
-    swayAmplitude: number;
-    swayPhase: number;
-    tumbleSpeedX: number;
-    tumbleSpeedY: number;
-    time: number;
+    swingFreq: number;
+    swingAmp: number;
+    windFactor: number;
+    phase: number;
+    spin: number;
+    age: number;
 }
 
+const LEAF_COLORS: [string, string, string][] = [
+    ['#9ccc5a', '#5f9a2e', '#3f6e1c'], // xanh non
+    ['#c9d65a', '#8fae34', '#5d7a1f'], // xanh vàng
+    ['#e7b347', '#c9822a', '#8a4e17'], // vàng úa
+];
+
 /**
- * Hệ thống lá cây chao liệng rơi trong gió (Falling Leaves in the Breeze)
- * - Tách lớp chuyển động độc lập: những chiếc lá màu xanh/vàng chao liệng rơi từ trên xuống.
- * - Xoay lật 3D tự nhiên (tumble & sway) theo luồng gió núi.
- * - Tự động tái sinh khi chạm đáy, tạo chu kỳ rơi vô tận không bao giờ bị cắt cảnh hay đứt gãy.
+ * Lá cây rơi trong gió (gắn vào camera, nằm phía sau tờ giấy):
+ * - Lắc lư kiểu con lắc + gió giật chung cho cả khung cảnh nên trông như cùng một luồng gió.
+ * - Rơi khỏi khung hình thì sinh lại ở mép trên/mép đón gió, mờ dần khi xuất hiện -> không bao giờ "bật" ra giữa màn hình.
  */
 export class FallingLeavesSystem {
-    public group: THREE.Group;
-    private leaves: LeafInstance[] = [];
+    public group = new THREE.Group();
+    private camera: THREE.PerspectiveCamera;
+    private leaves: Leaf[] = [];
+    private textures: THREE.CanvasTexture[] = [];
+    private geometry = new THREE.PlaneGeometry(0.075, 0.11);
+    private random = seededRandom(777);
     private isVisible = true;
-    private leafTexture: THREE.CanvasTexture;
+    private wind = 0;
 
-    constructor() {
-        this.group = new THREE.Group();
+    constructor(camera: THREE.PerspectiveCamera, count = 14) {
+        this.camera = camera;
         this.group.name = 'FallingLeavesSystem';
-        this.leafTexture = this.createLeafTexture();
-        this.createLeaves(18);
+        this.textures = LEAF_COLORS.map((c) => this.createLeafTexture(c));
+
+        for (let i = 0; i < count; i++) {
+            const material = new THREE.MeshBasicMaterial({
+                map: this.textures[i % this.textures.length],
+                transparent: true,
+                alphaTest: 0.05,
+                side: THREE.DoubleSide,
+                depthWrite: false,
+                opacity: 0,
+            });
+            const mesh = new THREE.Mesh(this.geometry, material);
+            this.group.add(mesh);
+            const leaf: Leaf = {
+                mesh,
+                material,
+                depth: 0,
+                x: 0,
+                y: 0,
+                fallSpeed: 0,
+                swingFreq: 0,
+                swingAmp: 0,
+                windFactor: 0,
+                phase: 0,
+                spin: 0,
+                age: 0,
+            };
+            this.respawn(leaf, true);
+            this.leaves.push(leaf);
+        }
     }
 
-    /**
-     * Vẽ texture chiếc lá tự nhiên mềm mại với gân lá và viền sắc nét
-     */
-    private createLeafTexture(): THREE.CanvasTexture {
+    private createLeafTexture([light, mid, dark]: [string, string, string]): THREE.CanvasTexture {
         const canvas = document.createElement('canvas');
-        canvas.width = 128;
-        canvas.height = 128;
+        canvas.width = 64;
+        canvas.height = 96;
         const ctx = canvas.getContext('2d')!;
 
-        ctx.clearRect(0, 0, 128, 128);
-
-        // Vẽ hình dáng chiếc lá hình thoi bầu dục uốn lượn
         ctx.beginPath();
-        ctx.moveTo(64, 8); // Đỉnh lá
-        ctx.bezierCurveTo(95, 30, 105, 75, 64, 118); // Cạnh phải
-        ctx.bezierCurveTo(23, 75, 33, 30, 64, 8);   // Cạnh trái
+        ctx.moveTo(32, 4);
+        ctx.bezierCurveTo(56, 22, 58, 58, 32, 84);
+        ctx.bezierCurveTo(6, 58, 8, 22, 32, 4);
         ctx.closePath();
-
-        // Màu sắc chuyển sắc từ xanh non sang vàng úa nhẹ của lá rừng nhiệt đới
-        const grad = ctx.createLinearGradient(64, 8, 64, 118);
-        grad.addColorStop(0, '#86efac'); // Xanh non mơn mởn ở chóp
-        grad.addColorStop(0.45, '#4ade80'); // Xanh lá cây tự nhiên
-        grad.addColorStop(0.85, '#22c55e'); // Xanh thẫm
-        grad.addColorStop(1, '#ca8a04'); // Hơi ố vàng nhẹ ở cuống lá
+        const grad = ctx.createLinearGradient(10, 10, 54, 80);
+        grad.addColorStop(0, light);
+        grad.addColorStop(0.55, mid);
+        grad.addColorStop(1, dark);
         ctx.fillStyle = grad;
         ctx.fill();
 
-        // Gân chính giữa sống lá
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
-        ctx.lineWidth = 2;
+        // Gân lá
+        ctx.strokeStyle = 'rgba(255, 255, 240, 0.35)';
+        ctx.lineWidth = 1.4;
         ctx.beginPath();
-        ctx.moveTo(64, 15);
-        ctx.quadraticCurveTo(65, 64, 64, 115);
+        ctx.moveTo(32, 8);
+        ctx.lineTo(32, 92);
+        for (let y = 22; y <= 70; y += 12) {
+            ctx.moveTo(32, y + 6);
+            ctx.lineTo(46, y - 2);
+            ctx.moveTo(32, y + 6);
+            ctx.lineTo(18, y - 2);
+        }
         ctx.stroke();
 
-        // Gân phụ nhỏ tỏa ra hai bên
-        ctx.lineWidth = 1;
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-        for (let y = 30; y <= 95; y += 14) {
-            ctx.beginPath();
-            ctx.moveTo(64, y);
-            ctx.lineTo(82, y - 8);
-            ctx.moveTo(64, y);
-            ctx.lineTo(46, y - 8);
-            ctx.stroke();
-        }
-
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.colorSpace = THREE.SRGBColorSpace;
-        return texture;
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        return tex;
     }
 
-    private createLeaves(count: number): void {
-        const leafGeo = new THREE.PlaneGeometry(0.12, 0.2);
-
-        const leafMat = new THREE.MeshBasicMaterial({
-            map: this.leafTexture,
-            transparent: true,
-            opacity: 0.88,
-            side: THREE.DoubleSide,
-            depthWrite: false,
-        });
-
-        for (let i = 0; i < count; i++) {
-            const mesh = new THREE.Mesh(leafGeo, leafMat.clone());
-
-            // Tọa độ khởi tạo ngẫu nhiên trong không gian phía trước và sau tờ giấy
-            const initialX = (Math.random() - 0.5) * 4.2;
-            const startY = -1.5 + Math.random() * 5.5; // Phân bổ đều theo chiều dọc ban đầu
-            const startZ = -1.2 - Math.random() * 4.0; // Khoảng cách sâu sau tờ giấy
-
-            mesh.position.set(initialX, startY, startZ);
-
-            // Tỷ lệ kích thước lá ngẫu nhiên (từ nhỏ 0.6x đến to 1.3x)
-            const scale = 0.55 + Math.random() * 0.65;
-            mesh.scale.set(scale, scale, scale);
-
-            // Góc xoay ngẫu nhiên
-            mesh.rotation.x = Math.random() * Math.PI;
-            mesh.rotation.y = Math.random() * Math.PI;
-            mesh.rotation.z = Math.random() * Math.PI;
-
-            this.group.add(mesh);
-
-            this.leaves.push({
-                mesh,
-                initialX,
-                fallSpeed: 0.28 + Math.random() * 0.35, // Tốc độ rơi êm ái
-                swaySpeed: 1.4 + Math.random() * 1.8,   // Nhịp chao đảo
-                swayAmplitude: 0.12 + Math.random() * 0.2, // Biên độ đung đưa
-                swayPhase: Math.random() * Math.PI * 2,
-                tumbleSpeedX: (Math.random() - 0.5) * 1.5,
-                tumbleSpeedY: (Math.random() - 0.5) * 2.0,
-                time: Math.random() * 20,
-            });
+    private respawn(leaf: Leaf, initial: boolean): void {
+        leaf.depth = 7.6 + this.random() * 3.6;
+        const { halfW, halfH } = halfExtents(this.camera, leaf.depth);
+        if (initial) {
+            leaf.x = (this.random() * 2 - 1) * halfW;
+            leaf.y = (this.random() * 2 - 1) * halfH;
+        } else if (this.random() < 0.3) {
+            // Một số lá bay vào từ mép đón gió
+            leaf.x = (this.wind >= 0 ? -1 : 1) * (halfW + 0.2);
+            leaf.y = (0.2 + this.random() * 0.8) * halfH;
+        } else {
+            leaf.x = (this.random() * 2 - 1) * halfW;
+            leaf.y = halfH + 0.15 + this.random() * 0.4;
         }
+        leaf.fallSpeed = 0.28 + this.random() * 0.22;
+        leaf.swingFreq = 1.1 + this.random() * 0.9;
+        leaf.swingAmp = 0.12 + this.random() * 0.14;
+        leaf.windFactor = 0.7 + this.random() * 0.6;
+        leaf.phase = this.random() * Math.PI * 2;
+        leaf.spin = (this.random() - 0.5) * 1.2;
+        leaf.age = 0;
+        leaf.mesh.scale.setScalar(0.8 + this.random() * 0.6);
+        leaf.material.opacity = initial ? 0.95 : 0;
     }
 
-    public update(delta: number): void {
+    public update(delta: number, time: number): void {
         if (!this.isVisible) return;
+        const dt = Math.min(delta, 0.1);
 
-        for (let i = 0; i < this.leaves.length; i++) {
-            const leaf = this.leaves[i];
-            leaf.time += delta;
+        // Gió chung: thổi nhẹ sang phải, thỉnh thoảng có cơn giật
+        this.wind = 0.12 + smoothNoise(time * 0.08, 4) * 0.22 + Math.max(0, smoothNoise(time * 0.21, 9)) * 0.25;
 
-            // Rơi xuống dần đều
-            leaf.mesh.position.y -= leaf.fallSpeed * delta;
+        for (const leaf of this.leaves) {
+            leaf.age += dt;
+            const swing = Math.sin(leaf.age * leaf.swingFreq + leaf.phase);
+            const swingVel = Math.cos(leaf.age * leaf.swingFreq + leaf.phase);
 
-            // Đung đưa lượn sóng sang hai bên theo gió
-            const sway = Math.sin(leaf.time * leaf.swaySpeed + leaf.swayPhase) * leaf.swayAmplitude;
-            const microWind = Math.cos(leaf.time * 0.8) * 0.05;
-            leaf.mesh.position.x = leaf.initialX + sway + microWind;
+            // Rơi chậm hơn khi đang ở đỉnh nhịp lắc (giống lá thật lượn)
+            leaf.y -= leaf.fallSpeed * (0.6 + 0.4 * Math.abs(swingVel)) * dt;
+            leaf.x += (this.wind * leaf.windFactor + swingVel * leaf.swingAmp * leaf.swingFreq) * dt;
 
-            // Lật xoay 3D chiếc lá trong không trung
-            leaf.mesh.rotation.x += leaf.tumbleSpeedX * delta;
-            leaf.mesh.rotation.y += leaf.tumbleSpeedY * delta;
-            leaf.mesh.rotation.z = Math.sin(leaf.time * leaf.swaySpeed) * 0.45;
+            leaf.mesh.position.set(leaf.x, leaf.y, -leaf.depth);
+            leaf.mesh.rotation.set(
+                0.5 + swing * 0.55,
+                Math.sin(leaf.age * 0.7 + leaf.phase) * 0.6,
+                -swingVel * 0.7 + leaf.spin * leaf.age * 0.3
+            );
 
-            // Khi lá rơi qua mép dưới khung hình -> Tái sinh trên đỉnh không gian
-            if (leaf.mesh.position.y < -2.2) {
-                leaf.mesh.position.y = 4.2 + Math.random() * 1.0;
-                leaf.initialX = (Math.random() - 0.5) * 4.2;
-                leaf.mesh.position.x = leaf.initialX;
-                leaf.mesh.position.z = -1.2 - Math.random() * 4.0;
-                leaf.fallSpeed = 0.28 + Math.random() * 0.35;
-                leaf.time = 0;
+            // Hiện dần khi mới sinh ra
+            leaf.material.opacity = Math.min(0.95, leaf.material.opacity + dt * 0.8);
+
+            const { halfW, halfH } = halfExtents(this.camera, leaf.depth);
+            if (leaf.y < -halfH - 0.3 || Math.abs(leaf.x) > halfW + 0.5) {
+                this.respawn(leaf, false);
             }
         }
     }
@@ -167,15 +173,8 @@ export class FallingLeavesSystem {
     }
 
     public dispose(): void {
-        this.leafTexture.dispose();
-        this.leaves.forEach((l) => {
-            l.mesh.geometry.dispose();
-            if (Array.isArray(l.mesh.material)) {
-                l.mesh.material.forEach((m) => m.dispose());
-            } else {
-                l.mesh.material.dispose();
-            }
-        });
+        disposeObjectTree(this.group);
+        this.textures.forEach((t) => t.dispose());
         this.leaves = [];
     }
 }

@@ -30,7 +30,7 @@ function DashboardView() {
     const [sheet, setSheet] = useState<Sheet>(mockPartialSheet);
     const [cameraPreset, setCameraPreset] = useState<'stream' | 'closeup' | 'overview'>('stream');
     const [obsMode, setObsMode] = useState<boolean>(false);
-    const [bgMode, setBgMode] = useState<'image' | 'video'>('video');
+    const [bgMode, setBgMode] = useState<'image' | 'video'>('image');
     const [currentVideoId, setCurrentVideoId] = useState<string>('vd1');
 
     const printerRef = useRef<PrinterCanvasHandle | null>(null);
@@ -48,6 +48,9 @@ function DashboardView() {
                 username: job.username,
                 avatarUrl: job.avatarUrl,
                 frame: job.frame,
+                // Server xếp quà vàng chiếm nguyên 1 hàng -> client vẽ đúng như vậy ngay từ đầu
+                isWide: job.frame !== 'normal',
+                sheetId: job.sheetId ?? undefined,
             };
 
             if (job.kind === 'fullPage') {
@@ -64,19 +67,18 @@ function DashboardView() {
             const nextSheet: Sheet = {
                 id: completedSheet.id + 1,
                 kind: 'standard',
-                capacity: 6,
+                capacity: 4,
                 entries: [],
                 completed: false,
             };
 
-            printerRef.current?.ejectSheet(nextSheet, () => {
-                setSheet(nextSheet);
-            });
+            // Tờ mới thật (kể cả trang đặc biệt) do server gửi ngay sau qua onSheetUpdate;
+            // nextSheet ở đây chỉ để tờ bên dưới có sẵn nội dung trong lúc chờ.
+            printerRef.current?.ejectSheet(nextSheet);
         },
         onSheetUpdate: (updatedSheet: Sheet) => {
-            if (!isPrintingRef.current) {
-                setSheet(updatedSheet);
-            }
+            // Scene tự giữ avatar đang/vừa in, nên luôn nhận dữ liệu mới (trước đây bỏ qua khi đang in -> hình trước bị mất)
+            setSheet(updatedSheet);
         },
         onBackgroundSync: (config) => {
             if (printerRef.current) {
@@ -89,7 +91,7 @@ function DashboardView() {
 
     // Đồng bộ snapshot ban đầu từ backend
     useEffect(() => {
-        if (currentSheet && !isPrintingRef.current) {
+        if (currentSheet) {
             setSheet(currentSheet);
         }
     }, [currentSheet]);
@@ -197,8 +199,9 @@ function DashboardView() {
                     <div
                         style={{
                             position: 'absolute',
-                            top: '12px',
+                            bottom: '12px',
                             left: '12px',
+                            zIndex: 30,
                             padding: '4px 10px',
                             background: 'rgba(15, 23, 42, 0.85)',
                             backdropFilter: 'blur(8px)',

@@ -83,14 +83,21 @@ export class PrinterEngine {
 
     private async process(job: PrintJob): Promise<void> {
         this.currentJob = job;
-        const isWide = job.frame === 'gold';
-        job.slot = job.kind === 'fullPage' ? 0 : this.sheets.getNextSlot(isWide);
-        job.sheetId = job.kind === 'fullPage' ? null : this.sheets.current.id;
+        const isWide = job.frame !== 'normal';
+
+        // Đổi tờ (nếu cần) TRƯỚC khi in để client vẽ lên đúng tờ, đúng ô
+        const isFullPage = job.kind === 'fullPage';
+        const early = isFullPage ? this.sheets.prepareFullPage() : this.sheets.prepareEntry(isWide);
+        for (const sheet of early) this.bus.emit('printer:sheet:completed', sheet);
+        if (early.length > 0 || isFullPage) this.bus.emit('printer:sheet', this.sheets.current);
+
+        job.slot = isFullPage ? 0 : this.sheets.getNextSlot(isWide);
+        job.sheetId = this.sheets.current.id;
         this.bus.emit('printer:job:started', job);
         this.emitState();
 
         try {
-            const factor = job.kind === 'fullPage' ? this.options.fullPageTimeFactor : 1;
+            const factor = job.kind === 'fullPage' || job.frame === 'vip' ? this.options.fullPageTimeFactor : 1;
             await sleep((this.options.basePrintMs * factor) / this.speed);
             this.place(job);
             this.queue.finish(job, 'completed');
@@ -111,7 +118,7 @@ export class PrinterEngine {
             username: job.username,
             avatarUrl: job.avatarUrl,
             frame: job.frame,
-            isWide: job.frame === 'gold',
+            isWide: job.frame !== 'normal',
         };
 
         if (job.kind === 'fullPage') {

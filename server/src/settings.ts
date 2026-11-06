@@ -10,11 +10,26 @@ export interface BackgroundSettings {
     showBirds: boolean;
 }
 
+export interface AudioSettings {
+    /** 0..1 – âm lượng tiếng bút / chuông / cuộn giấy */
+    sfxVolume: number;
+    /** 0..1 – âm lượng nhạc nền */
+    bgmVolume: number;
+}
+
+export const DEFAULT_AUDIO_SETTINGS: AudioSettings = { sfxVolume: 1, bgmVolume: 0.7 };
+
+export const getAudioConfig = (): AudioSettings => {
+    const s = loadSettings();
+    return s.audio ? { ...DEFAULT_AUDIO_SETTINGS, ...s.audio } : DEFAULT_AUDIO_SETTINGS;
+};
+
 export interface PersistedSettings {
     tiktokUser?: string;
     goldDiamonds?: number;
     fullPageDiamonds?: number;
     background?: BackgroundSettings;
+    audio?: AudioSettings;
 }
 
 export const DEFAULT_BACKGROUND_SETTINGS: BackgroundSettings = {

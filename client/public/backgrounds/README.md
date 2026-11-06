@@ -1,26 +1,24 @@
-# Thư mục Cảnh Nền (Backgrounds - Video & Ảnh)
+# Thư mục Cảnh Nền (Backgrounds)
 
-Dự án hỗ trợ thay đổi cảnh nền livestream linh hoạt với **2 chế độ**:
-1. **🎬 Video Nền Động (Video Background)**: Phát video AI (Google Flow / Veo / Sora) với thiên nhiên chuyển động chân thực (gió thổi, lá rơi, chim bay, mây trôi...).
-2. **🖼️ Ảnh Nền Tĩnh (Image Wallpaper)**: Hiển thị ảnh wallpaper sắc nét kết hợp hiệu ứng 3D bướm bay và đàn chim trời.
+Có **2 chế độ** nền, đổi qua nút **🎬 Đổi Cảnh Nền** (hoặc mục 4 trong Dev Controls):
 
----
+## 🌄 1. Cảnh Sống (mặc định – khuyên dùng cho livestream dài)
 
-### 🎬 1. Cách đưa Video Nền của riêng bạn vào (Khuyên dùng):
-* Tải các video tạo từ **Google Flow** (chuẩn dọc **9:16**, thời lượng từ 10s đến 4 phút, định dạng `.mp4`) và đặt vào thư mục này với các tên sau:
-  - **`vd1.mp4`**: Video cảnh 1 (Mặc định - đã có sẵn video bạn tạo).
-  - **`vd2.mp4`**: Video cảnh 2.
-  - **`vd3.mp4`**: Video cảnh 3.
-* *Hệ thống tự động phát lặp mượt mà (loop), chạy qua Hardware Decode không hao tốn tài nguyên GPU render 3D.*
-* Bạn cũng có thể bấm nút **`📁 Tải Video Lên`** trực tiếp trên thanh Quick Bar hoặc Bảng Dev Controls để chọn file video trên máy tính ngay lập tức.
+- Ảnh nền tĩnh `mountain-mist.jpg` + các lớp chuyển động do Three.js tạo theo thời gian thực:
+  mây trời trôi chậm, sương thung lũng, chim liệng / đàn chim bay ngang, bướm, lá rơi trong gió.
+- Chạy **vô tận, không có điểm cắt**, góc nhìn và màu sắc cố định tuyệt đối.
+- `mountain-mist.jpg` được tách từ `vd1.mp4`: lấy trung vị ~36 khung hình đầu để xoá chim/bướm/lá vẽ sẵn,
+  rồi lấp vùng tờ giấy trắng vẽ sẵn bằng sương.
+- Muốn cảnh khác: chuẩn bị ảnh **9:16 không có chim, lá, bướm, tờ giấy**
+  (các thứ đó hệ thống tự vẽ), rồi bấm **📁 Tải Ảnh Lên**.
 
----
+## 🎬 2. Video
 
-### 🖼️ 2. Các ảnh nền tĩnh có sẵn:
-- **`mountain-mist.jpg`**: Cảnh thung lũng núi non mây mù hùng vĩ buổi sáng (chuẩn).
-- **`sunset-clouds.jpg`**: Cảnh hoàng hôn chân mây rực rỡ lãng mạn.
-- **`cozy-lofi.jpg`**: Cửa sổ phòng Lofi nhìn ra thành phố đêm.
-- **`cyberpunk.jpg`**: Thành phố tương lai ánh đèn neon rực rỡ.
-
-*Bạn có thể chuyển đổi qua lại giữa chế độ Video và Ảnh bất kỳ lúc nào trên thanh điều khiển!*
-
+- Đặt file vào thư mục này với tên `vd1.mp4`, `vd2.mp4`, `vd3.mp4` (9:16, `.mp4`).
+  Video nào chưa có file sẽ tự ẩn khỏi danh sách.
+- Điểm lặp được **hoà trộn chéo** (2 lớp video) nên không bị giật cảnh.
+  Với `vd1.mp4` chỉ phát đoạn 0–6.2s vì sau đó đàn chim lao vào camera
+  (cấu hình `loopStart / loopEnd / crossfade` trong `src/printer3d/backgroundManager.ts`).
+- Khi phát video, chim/lá/bướm 3D tự tắt vì video đã có sẵn.
+- Video AI tạo từng đoạn ngắn nên camera thường hơi trôi/zoom trong đoạn; nếu cần cảnh đứng yên tuyệt đối
+  trong thời gian dài, hãy dùng chế độ Cảnh Sống.

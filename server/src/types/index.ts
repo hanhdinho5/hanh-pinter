@@ -14,7 +14,8 @@ export interface ViewerEvent {
     diamondCount: number;
 }
 
-export type FrameType = 'normal' | 'gold';
+/** gold: quà ≥ ngưỡng vàng; vip: quà ≥ ngưỡng VIP (khung vương miện). Cả hai đều chiếm nguyên 1 hàng. */
+export type FrameType = 'normal' | 'gold' | 'vip';
 export type JobKind = 'single' | 'fullPage';
 export type JobLane = 'free' | 'priority';
 export type JobStatus = 'pending' | 'printing' | 'completed' | 'failed';
@@ -90,6 +91,11 @@ export interface BackgroundConfig {
     showBirds: boolean;
 }
 
+export interface AudioConfig {
+    sfxVolume: number;
+    bgmVolume: number;
+}
+
 /** Nguồn sự thật duy nhất cho tên + payload của các sự kiện realtime. */
 export interface RealtimeEventMap {
     'printer:state': [PrinterState];
@@ -102,6 +108,7 @@ export interface RealtimeEventMap {
     event: [ViewerEvent];
     'tiktok:status': [TikTokStatus];
     'background:sync': [BackgroundConfig];
+    'audio:sync': [AudioConfig];
 }
 
 export type ServerToClientEvents = {

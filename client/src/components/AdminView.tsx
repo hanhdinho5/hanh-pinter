@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../socket/socketClient';
 import { usePrinterSocket } from '../socket/usePrinterSocket';
 import { soundManager } from '../audio/SoundManager';
@@ -77,6 +77,13 @@ export function AdminView() {
             setFull(c.fullPageDiamonds);
         }).catch(() => undefined);
 
+        api.getAudioConfig().then((a) => {
+            soundManager.setSfxVolume(a.sfxVolume);
+            soundManager.setBgmVolume(a.bgmVolume);
+            setSfxVol(Math.round(a.sfxVolume * 100));
+            setBgmVol(Math.round(a.bgmVolume * 100));
+        }).catch(() => undefined);
+
         api.getBackgroundConfig().then((cfg) => {
             setBgPreset(cfg.presetId);
             setAutoRotate(cfg.autoRotate);
@@ -85,6 +92,19 @@ export function AdminView() {
             setShowBirds(cfg.showBirds);
         }).catch(() => undefined);
     }, []);
+
+    // Lưu âm lượng lên server (debounce) -> đồng bộ tới overlay OBS / TikTok LIVE Studio
+    const audioSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const pendingAudio = useRef<{ sfxVolume?: number; bgmVolume?: number }>({});
+    const saveAudio = (patch: { sfxVolume?: number; bgmVolume?: number }) => {
+        pendingAudio.current = { ...pendingAudio.current, ...patch };
+        if (audioSaveTimer.current) clearTimeout(audioSaveTimer.current);
+        audioSaveTimer.current = setTimeout(() => {
+            const body = pendingAudio.current;
+            pendingAudio.current = {};
+            api.setAudioConfig(body).catch(() => undefined);
+        }, 250);
+    };
 
     const updateBgConfig = async (patch: Partial<BackgroundConfig>) => {
         try {
@@ -174,7 +194,7 @@ export function AdminView() {
                 <section style={card}>
                     <h2 style={{ margin: 0, fontSize: 16 }}>Ngưỡng quà (kim cương)</h2>
                     <label style={{ fontSize: 13 }}>Khung vàng từ <input style={{ ...input, width: 90 }} type="number" min={1} value={gold} onChange={(e) => setGold(Number(e.target.value))} /></label>
-                    <label style={{ fontSize: 13 }}>In nguyên trang từ <input style={{ ...input, width: 90 }} type="number" min={2} value={full} onChange={(e) => setFull(Number(e.target.value))} /></label>
+                    <label style={{ fontSize: 13 }}>Khung VIP vương miện từ <input style={{ ...input, width: 90 }} type="number" min={2} value={full} onChange={(e) => setFull(Number(e.target.value))} /></label>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                         <button style={btn()} onClick={() => void saveGift()}>Lưu</button>
                         <span style={{ fontSize: 13, color: '#94a3b8' }}>{giftMsg}</span>
@@ -230,6 +250,7 @@ export function AdminView() {
                                 const v = Number(e.target.value);
                                 setBgmVol(v);
                                 soundManager.setBgmVolume(v / 100);
+                                saveAudio({ bgmVolume: v / 100 });
                             }}
                         />
                     </label>
@@ -245,6 +266,7 @@ export function AdminView() {
                                 const v = Number(e.target.value);
                                 setSfxVol(v);
                                 soundManager.setSfxVolume(v / 100);
+                                saveAudio({ sfxVolume: v / 100 });
                             }}
                         />
                     </label>
@@ -389,7 +411,7 @@ export function AdminView() {
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                         <button style={btn('#334155')} onClick={() => void api.sendMockComment(`test${Math.floor(Math.random() * 999)}`)}>Comment</button>
                         <button style={btn('#334155')} onClick={() => void api.sendMockGift(`vip${Math.floor(Math.random() * 999)}`, 'Rose', gold)}>Quà vàng</button>
-                        <button style={btn('#334155')} onClick={() => void api.sendMockGift(`vip${Math.floor(Math.random() * 999)}`, 'Lion', full)}>Quà nguyên trang</button>
+                        <button style={btn('#334155')} onClick={() => void api.sendMockGift(`vip${Math.floor(Math.random() * 999)}`, 'Lion', full)}>Quà VIP vương miện</button>
                     </div>
                 </section>
 

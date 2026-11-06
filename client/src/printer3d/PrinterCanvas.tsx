@@ -1,6 +1,7 @@
-import { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
+import { useEffect, useRef, useImperativeHandle, forwardRef, useState } from 'react';
 import { PrinterWorkshopScene } from './PrinterWorkshopScene';
 import type { Sheet, SheetEntry, PrinterStatus } from '../types';
+import { api } from '../socket/socketClient';
 
 export interface PrinterCanvasHandle {
     printSlot: (entry: SheetEntry, durationSeconds?: number, onComplete?: () => void) => void;
@@ -46,6 +47,16 @@ export const PrinterCanvas = forwardRef<PrinterCanvasHandle, PrinterCanvasProps>
     ) {
         const containerRef = useRef<HTMLDivElement>(null);
         const sceneRef = useRef<PrinterWorkshopScene | null>(null);
+        const outerRef = useRef<HTMLDivElement>(null);
+        const [frameWidth, setFrameWidth] = useState(540);
+
+        useEffect(() => {
+            const el = outerRef.current;
+            if (!el) return;
+            const ro = new ResizeObserver(() => setFrameWidth(el.clientWidth || 540));
+            ro.observe(el);
+            return () => ro.disconnect();
+        }, []);
 
         useImperativeHandle(ref, () => ({
             printSlot(entry, durationSeconds, onComplete) {
@@ -91,6 +102,10 @@ export const PrinterCanvas = forwardRef<PrinterCanvasHandle, PrinterCanvasProps>
 
             const scene = new PrinterWorkshopScene(containerRef.current);
             sceneRef.current = scene;
+            if (import.meta.env.DEV) {
+                // Móc debug khi phát triển (không có trong bản build)
+                (window as unknown as { __printerScene?: PrinterWorkshopScene }).__printerScene = scene;
+            }
 
             scene.updateSheet(sheet);
             scene.setPrinterStatus(status, currentSlot);
@@ -146,15 +161,99 @@ export const PrinterCanvas = forwardRef<PrinterCanvasHandle, PrinterCanvasProps>
         }, [showButterflies, showBirds]);
 
         return (
-            <div
-                ref={containerRef}
-                style={{
-                    width: '100%',
-                    height: '100%',
-                    overflow: 'hidden',
-                    position: 'relative',
-                }}
-            />
+            <div ref={outerRef} style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
+                <div
+                    ref={containerRef}
+                    style={{
+                        position: 'absolute',
+                        inset: 0,
+                        overflow: 'hidden',
+                    }}
+                />
+                <ActionBadges frameWidth={frameWidth} />
+            </div>
         );
     }
 );
+
+/** Đọc ngưỡng xu của khung vàng / VIP từ server (đổi trong trang admin thì tối đa 30s sau badge cập nhật) */
+function useGiftThresholds(): { gold: number; vip: number } {
+    const [t, setT] = useState({ gold: 100, vip: 1000 });
+    useEffect(() => {
+        let alive = true;
+        const load = () =>
+            api
+                .getGiftConfig()
+                .then((c) => {
+                    if (alive && c?.goldDiamonds && c?.fullPageDiamonds) setT({ gold: c.goldDiamonds, vip: c.fullPageDiamonds });
+                })
+                .catch(() => undefined);
+        void load();
+        const id = window.setInterval(load, 30_000);
+        return () => {
+            alive = false;
+            window.clearInterval(id);
+        };
+    }, []);
+    return t;
+}
+
+const fmtXu = (n: number) => `${n.toLocaleString('vi-VN')} xu`;
+
+/**
+ * Dải hướng dẫn cho người xem: làm gì -> được in thế nào.
+ * Icon dùng emoji gần giống quà TikTok tương ứng: 🌹 Hoa hồng (1 xu), 🎊 Pháo giấy (100 xu), 🌌 Thiên hà (1.000 xu).
+ */
+function ActionBadges({ frameWidth }: { frameWidth: number }) {
+    const { gold, vip } = useGiftThresholds();
+    const badges = [
+        { icon: '💬', title: 'Bình luận', sub: 'In ảnh', color: '#7dd3fc' },
+        { icon: '➕', title: 'Follow', sub: 'In ảnh', color: '#86efac' },
+        { icon: '🌹', title: 'Tặng quà', sub: 'In ưu tiên', color: '#fda4af' },
+        { icon: '🎊', title: `Từ ${fmtXu(gold)}`, sub: 'Khung vàng', color: '#fcd34d' },
+        { icon: '🌌', title: `Từ ${fmtXu(vip)}`, sub: 'Khung VIP 👑', color: '#f0abfc' },
+    ];
+    // Khung 9:16 rộng ~540px -> chữ ~10px; khung OBS 1080px -> ~20px
+    const fontSize = Math.max(8, Math.min(20, frameWidth * 0.019));
+    return (
+        <div
+            style={{
+                position: 'absolute',
+                top: `${fontSize * 1.4}px`,
+                left: 0,
+                right: 0,
+                zIndex: 20,
+                display: 'flex',
+                justifyContent: 'center',
+                gap: `${fontSize * 0.45}px`,
+                padding: `0 ${fontSize * 0.8}px`,
+                pointerEvents: 'none',
+                fontFamily: '"Segoe UI", system-ui, sans-serif',
+            }}
+        >
+            {badges.map((b) => (
+                <div
+                    key={b.title}
+                    style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: `${fontSize * 0.4}px`,
+                        padding: `${fontSize * 0.35}px ${fontSize * 0.65}px`,
+                        borderRadius: `${fontSize * 0.9}px`,
+                        background: 'rgba(15, 23, 42, 0.6)',
+                        border: `1px solid ${b.color}77`,
+                        backdropFilter: 'blur(6px)',
+                        whiteSpace: 'nowrap',
+                        textShadow: '0 1px 2px rgba(0,0,0,0.5)',
+                    }}
+                >
+                    <span style={{ fontSize: `${fontSize * 1.7}px`, lineHeight: 1 }}>{b.icon}</span>
+                    <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15 }}>
+                        <span style={{ color: '#f8fafc', fontSize: `${fontSize}px`, fontWeight: 700 }}>{b.title}</span>
+                        <span style={{ color: b.color, fontSize: `${fontSize * 0.92}px`, fontWeight: 800 }}>{b.sub}</span>
+                    </span>
+                </div>
+            ))}
+        </div>
+    );
+}

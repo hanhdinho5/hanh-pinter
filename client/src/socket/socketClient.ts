@@ -1,5 +1,5 @@
 import { io, type Socket } from 'socket.io-client';
-import type { RealtimeEventMap, ViewerEvent, BackgroundConfig } from '../types';
+import type { RealtimeEventMap, ViewerEvent, BackgroundConfig, AudioConfig } from '../types';
 
 export type TypedSocket = Socket<RealtimeEventMap>;
 
@@ -137,6 +137,20 @@ export const api = {
         const body = await res.json();
         if (!res.ok) throw new Error(body.error ?? 'Lỗi lưu cấu hình background');
         return body as BackgroundConfig;
+    },
+    async getAudioConfig(serverUrl = DEFAULT_SERVER_URL) {
+        const res = await fetch(`${serverUrl}/api/config/audio`);
+        return res.json() as Promise<AudioConfig>;
+    },
+    async setAudioConfig(patch: Partial<AudioConfig>, serverUrl = DEFAULT_SERVER_URL) {
+        const res = await fetch(`${serverUrl}/api/config/audio`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(patch),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error ?? 'Lỗi lưu âm lượng');
+        return body as AudioConfig;
     },
 };
 export type { ViewerEvent };

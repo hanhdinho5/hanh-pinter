@@ -12,6 +12,13 @@ export const extractAvatarUrl = (data: unknown): string | null => {
     if (!data || typeof data !== 'object') return null;
     const d = data as Record<string, unknown>;
 
+    // Ưu tiên ảnh lớn (avatarLarger/Medium) cho avatar in ra nét, ảnh thumb chỉ ~100px
+    const u = d['user'] as Record<string, unknown> | undefined;
+    for (const key of ['avatarLarger', 'avatarLarge', 'avatarMedium']) {
+        const big = u?.[key] as Record<string, unknown> | undefined;
+        if (Array.isArray(big?.['urlList']) && big['urlList'].length > 0) return String(big['urlList'][0]);
+    }
+
     if (typeof d['profilePictureUrl'] === 'string' && d['profilePictureUrl']) {
         return d['profilePictureUrl'];
     }

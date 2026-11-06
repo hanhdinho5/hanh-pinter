@@ -77,9 +77,37 @@ export class SheetManager {
         return this.sheet.entries.some((e) => e.userId === userId);
     }
 
+    /**
+     * Chuẩn bị tờ TRƯỚC khi in một avatar: nếu tờ hiện tại không còn chỗ (quà to cần 1 hàng trống,
+     * hoặc tờ đã đầy) thì đổi sang tờ mới ngay. Nhờ vậy client vẽ đúng tờ, đúng ô ngay từ đầu.
+     * Trả về các tờ vừa hoàn tất (để báo cho client trước khi bắt đầu in).
+     */
+    prepareEntry(isWide: boolean): Sheet[] {
+        const status = this.getRowStatus();
+        const noRowForWide = isWide && status.row0Entries.length > 0 && status.row1Entries.length > 0;
+        if (this.sheet.kind === 'special' || noRowForWide || status.isSheetFull) {
+            return [this.rotate()];
+        }
+        return [];
+    }
+
+    /** Chuẩn bị trang đặc biệt TRƯỚC khi in: đẩy tờ đang dở đi rồi đặt trang đặc biệt (trống) làm tờ hiện tại. */
+    prepareFullPage(): Sheet[] {
+        if (this.sheet.kind === 'special' && this.sheet.entries.length === 0) return [];
+        const completed: Sheet[] = [];
+        if (this.sheet.entries.length > 0) {
+            const done = this.sheet;
+            done.completed = true;
+            this.completedCount += 1;
+            completed.push(done);
+        }
+        this.sheet = this.createSheet('special', 1);
+        return completed;
+    }
+
     /** Thêm avatar vào tờ hiện tại. Hỗ trợ avatar quà to chiếm nguyên một hàng. */
     addEntry(input: EntryInput): { sheet: Sheet; completed: Sheet | null } {
-        const isWide = Boolean(input.isWide ?? (input.frame === 'gold'));
+        const isWide = Boolean(input.isWide ?? (input.frame !== 'normal'));
         let status = this.getRowStatus();
         let earlyCompletedSheet: Sheet | null = null;
 
@@ -122,13 +150,9 @@ export class SheetManager {
      * rồi tạo tờ đặc biệt chỉ có 1 avatar và hoàn tất ngay.
      */
     addFullPage(input: EntryInput): Sheet[] {
-        const completed: Sheet[] = [];
-        if (this.sheet.entries.length > 0) completed.push(this.rotate());
-        const special = this.createSheet('special', 1);
-        special.entries.push({ slot: 0, isWide: true, ...input });
-        special.completed = true;
-        this.completedCount += 1;
-        completed.push(special);
+        const completed = this.prepareFullPage(); // rỗng nếu đã chuẩn bị trước khi in
+        this.sheet.entries.push({ slot: 0, isWide: true, ...input });
+        completed.push(this.rotate()); // trang đặc biệt hoàn tất, sang tờ thường mới
         return completed;
     }
 

@@ -1,5 +1,6 @@
-import { useState, useRef } from 'react';
-import { BACKGROUND_PRESETS, VIDEO_PRESETS } from '../printer3d/backgroundManager';
+import { useState, useRef, useEffect } from 'react';
+import { BACKGROUND_PRESETS } from '../printer3d/backgroundManager';
+import { useAvailableVideos } from './useAvailableVideos';
 
 interface QuickBackgroundBarProps {
     currentPresetId: string;
@@ -17,13 +18,15 @@ interface QuickBackgroundBarProps {
     showBirds: boolean;
     onToggleBirds: (enabled: boolean) => void;
     onTriggerBirds: () => void;
+    /** Trang OBS: ẩn nút khi không rê chuột để không lộ lên sóng livestream */
+    autoHide?: boolean;
 }
 
 export function QuickBackgroundBar({
     currentPresetId,
     onSelectPreset,
     onUploadCustomImage,
-    bgMode = 'video',
+    bgMode = 'image',
     onToggleBgMode,
     currentVideoId = 'vd1',
     onSelectVideo,
@@ -35,11 +38,38 @@ export function QuickBackgroundBar({
     showBirds,
     onToggleBirds,
     onTriggerBirds,
+    autoHide = false,
 }: QuickBackgroundBarProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [activeTab, setActiveTab] = useState<'video' | 'image'>(bgMode);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const videoInputRef = useRef<HTMLInputElement>(null);
+    const availableVideos = useAvailableVideos();
+    const [pointerActive, setPointerActive] = useState(!autoHide);
+
+    // Đồng bộ tab khi chế độ nền đổi từ nơi khác (DevControls, server)
+    useEffect(() => {
+        setActiveTab(bgMode);
+    }, [bgMode]);
+
+    useEffect(() => {
+        if (!autoHide) return;
+        let timer: number | undefined;
+        const wake = () => {
+            setPointerActive(true);
+            window.clearTimeout(timer);
+            timer = window.setTimeout(() => setPointerActive(false), 3000);
+        };
+        window.addEventListener('mousemove', wake);
+        window.addEventListener('touchstart', wake);
+        return () => {
+            window.clearTimeout(timer);
+            window.removeEventListener('mousemove', wake);
+            window.removeEventListener('touchstart', wake);
+        };
+    }, [autoHide]);
+
+    const hidden = autoHide && !pointerActive && !isOpen;
 
     const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -78,7 +108,9 @@ export function QuickBackgroundBar({
                 flexDirection: 'column',
                 alignItems: 'center',
                 gap: '8px',
-                pointerEvents: 'auto',
+                pointerEvents: hidden ? 'none' : 'auto',
+                opacity: hidden ? 0 : 1,
+                transition: 'opacity 0.4s ease',
             }}
         >
             <input
@@ -176,14 +208,14 @@ export function QuickBackgroundBar({
                                 transition: 'all 0.2s ease',
                             }}
                         >
-                            🖼️ Ảnh Tĩnh (Wallpaper)
+                            🌄 Cảnh Sống (vô tận)
                         </button>
                     </div>
 
                     {/* NỘI DUNG TAB VIDEO */}
                     {activeTab === 'video' && (
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px' }}>
-                            {VIDEO_PRESETS.map((v) => {
+                            {availableVideos.map((v) => {
                                 const active = currentVideoId === v.id;
                                 return (
                                     <button
@@ -353,7 +385,7 @@ export function QuickBackgroundBar({
                 }}
             >
                 <span>🎬</span>
-                <span>{isOpen ? 'Đóng Tùy Chọn' : 'Đổi Video / Background'}</span>
+                <span>{isOpen ? 'Đóng Tùy Chọn' : 'Đổi Cảnh Nền'}</span>
             </button>
         </div>
     );

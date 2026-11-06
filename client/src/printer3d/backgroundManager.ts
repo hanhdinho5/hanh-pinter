@@ -1,12 +1,7 @@
-import * as THREE from 'three';
-
 export interface BackgroundPreset {
     id: string;
     name: string;
-    url?: string;
-    isOutdoor: boolean;
-    keyLightColor: number;
-    ambientColor: number;
+    url: string;
     badge: string;
 }
 
@@ -15,14 +10,28 @@ export interface VideoPreset {
     name: string;
     url: string;
     badge: string;
+    /**
+     * Chỉ phát đoạn [loopStart, loopEnd] (giây) của video. Dùng để bỏ phần cuối clip AI
+     * bị hỏng (vd: chim lao thẳng vào camera). Bỏ trống = phát hết video.
+     */
+    loopStart?: number;
+    loopEnd?: number;
+    /** Thời gian hoà trộn (giây) giữa cuối đoạn và đầu đoạn để vòng lặp không bị giật. */
+    crossfade?: number;
 }
+
+export type BackgroundMode = 'image' | 'video';
 
 export const VIDEO_PRESETS: VideoPreset[] = [
     {
         id: 'vd1',
         name: 'Video Cảnh 1 (vd1.mp4)',
         url: '/backgrounds/vd1.mp4',
-        badge: '🎬 VIDEO 1 (VD1)',
+        badge: '🎬 VIDEO 1',
+        // vd1.mp4 (Google Flow, 10s): sau ~6.5s đàn chim lao vào camera -> cắt bỏ
+        loopStart: 0,
+        loopEnd: 6.2,
+        crossfade: 1.6,
     },
     {
         id: 'vd2',
@@ -41,224 +50,264 @@ export const VIDEO_PRESETS: VideoPreset[] = [
 export const BACKGROUND_PRESETS: BackgroundPreset[] = [
     {
         id: 'mountain-mist',
-        name: 'Núi Non Mây Mù (Bình Minh)',
+        name: 'Thung Lũng Mây (tách từ vd1)',
         url: '/backgrounds/mountain-mist.jpg',
-        isOutdoor: true,
-        keyLightColor: 0xffedd5,
-        ambientColor: 0xe0f2fe,
-        badge: '🌄 NÚI MÂY',
-    },
-    {
-        id: 'sunset-clouds',
-        name: 'Hoàng Hôn Rực Rỡ',
-        url: '/backgrounds/sunset-clouds.jpg',
-        isOutdoor: true,
-        keyLightColor: 0xfdba74,
-        ambientColor: 0xfecdd3,
-        badge: '🌇 HOÀNG HÔN',
-    },
-    {
-        id: 'cozy-lofi',
-        name: 'Phòng Lofi Thư Giãn',
-        url: '/backgrounds/cozy-lofi.jpg',
-        isOutdoor: true,
-        keyLightColor: 0xd8b4fe,
-        ambientColor: 0x38bdf8,
-        badge: '☕ LOFI ĐÊM',
-    },
-    {
-        id: 'cyberpunk',
-        name: 'Cyberpunk Neon',
-        url: '/backgrounds/cyberpunk.jpg',
-        isOutdoor: true,
-        keyLightColor: 0x38bdf8,
-        ambientColor: 0xf43f5e,
-        badge: '⚡ CYBERPUNK',
+        badge: '🌄 THUNG LŨNG MÂY',
     },
 ];
 
+let availableVideosPromise: Promise<string[]> | null = null;
+
 /**
- * Quản lý đổi cảnh nền (Backgrounds), hiệu ứng chuyển cảnh mờ dần (Cross-Fade)
- * và chế độ tự động xoay vòng ảnh nền (Auto-Rotate).
+ * Kiểm tra file video nào thực sự tồn tại trong /public/backgrounds.
+ * (Vite dev server trả index.html với mã 200 cho file không tồn tại, nên phải kiểm tra content-type.)
+ */
+export function detectAvailableVideos(): Promise<string[]> {
+    if (!availableVideosPromise) {
+        availableVideosPromise = Promise.all(
+            VIDEO_PRESETS.map(async (v) => {
+                try {
+                    const res = await fetch(v.url, { method: 'HEAD' });
+                    const type = res.headers.get('content-type') ?? '';
+                    return res.ok && type.startsWith('video/') ? v.id : null;
+                } catch {
+                    return null;
+                }
+            })
+        ).then((ids) => ids.filter((id): id is string => id !== null));
+    }
+    return availableVideosPromise;
+}
+
+const DEFAULT_CROSSFADE = 1.2;
+
+/**
+ * Quản lý lớp nền phía SAU canvas Three.js (canvas trong suốt nằm trên):
+ * - Chế độ 'image' (Cảnh sống): ảnh tĩnh, mọi chuyển động (mây, chim, lá, bướm) do Three.js tạo -> chạy vô tận không có điểm cắt.
+ * - Chế độ 'video': 2 thẻ <video> chồng nhau, hoà trộn chéo ở điểm lặp để không bị giật cảnh.
  */
 export class BackgroundManager {
-    public group: THREE.Group;
-    private textureLoader = new THREE.TextureLoader();
-    private textureCache = new Map<string, THREE.Texture>();
+    private layerRoot: HTMLDivElement | null = null;
+    private imageLayers: HTMLDivElement[] = [];
+    private activeImageLayer = 0;
+    private videos: HTMLVideoElement[] = [];
+    private videoBottomFog: HTMLDivElement | null = null;
+    private activeVideo = 0;
+    private crossfading = false;
+    private crossfadeTimer = 0;
 
-    // Hai tấm nền chuyển đổi mượt mà (Cross-Fade Quads)
-    private quadA: THREE.Mesh;
-    private quadB: THREE.Mesh;
-    private activeQuadIndex: 0 | 1 = 0;
-    private isCrossFading = false;
-    private crossFadeProgress = 1.0;
-    private crossFadeDuration = 1.2; // giây
+    private mode: BackgroundMode = 'image';
+    private currentPresetId = BACKGROUND_PRESETS[0].id;
+    private currentVideo: VideoPreset = VIDEO_PRESETS[0];
+    private objectUrls: string[] = [];
 
-    // Trạng thái hiện tại
-    private currentPresetId = 'mountain-mist';
     private autoRotate = false;
-    private rotateIntervalSeconds = 300; // Mặc định 5 phút
-    private autoRotateTimer = 0.0;
+    private rotateIntervalSeconds = 300;
+    private autoRotateTimer = 0;
 
-    // Chế độ nền: 'video' (ưu tiên phát video AI vd1.mp4) hoặc 'image' (ảnh tĩnh)
-    private mode: 'image' | 'video' = 'video';
-    private currentVideoId = 'vd1';
-    private videoElement: HTMLVideoElement | null = null;
-    private autoNextVideo = false;
-
-    private scene: THREE.Scene | null = null;
-    private container: HTMLElement | null = null;
-    private renderer: THREE.WebGLRenderer | null = null;
-
-    // Tham chiếu tới các đồ vật trong xưởng để ẩn/hiện khi đổi giữa ngoài trời và trong xưởng
-    private workshopProps: THREE.Object3D[] = [];
-
-    // Callback khi background tự động đổi
     public onBackgroundChanged?: (presetId: string) => void;
+    public onModeChanged?: (mode: BackgroundMode) => void;
+    /** Báo ảnh nền mới cho lớp "ảnh sống" WebGL (ảnh DOM chỉ là lớp dự phòng khi texture chưa tải xong) */
+    public onImageChanged?: (url: string) => void;
 
-    constructor() {
-        this.group = new THREE.Group();
-        this.group.name = 'BackgroundManager';
+    public attach(container: HTMLElement): void {
 
-        // Tạo 2 tấm quad nền dự phòng
-        const bgGeo = new THREE.PlaneGeometry(10.5, 8.2);
-
-        const matA = new THREE.MeshBasicMaterial({
-            transparent: true,
-            opacity: 1.0,
-            depthWrite: false,
+        const root = document.createElement('div');
+        root.dataset.role = 'background-layers';
+        Object.assign(root.style, {
+            position: 'absolute',
+            inset: '0',
+            zIndex: '0',
+            pointerEvents: 'none',
+            overflow: 'hidden',
+            backgroundColor: '#9fb8cf',
         });
-        this.quadA = new THREE.Mesh(bgGeo, matA);
-        this.quadA.position.set(0, 3.6, -2.48);
-        this.quadA.visible = false;
-        this.group.add(this.quadA);
 
-        const matB = new THREE.MeshBasicMaterial({
-            transparent: true,
-            opacity: 0.0,
-            depthWrite: false,
-        });
-        this.quadB = new THREE.Mesh(bgGeo.clone(), matB);
-        this.quadB.position.set(0, 3.6, -2.47);
-        this.quadB.visible = false;
-        this.group.add(this.quadB);
-    }
-
-    public setSceneAndContainer(scene: THREE.Scene, container: HTMLElement, renderer?: THREE.WebGLRenderer): void {
-        this.scene = scene;
-        this.container = container;
-        this.renderer = renderer ?? null;
-        this.container.style.position = 'relative';
-        this.container.style.overflow = 'hidden';
-
-        this.initVideoElement();
-
-        if (this.mode === 'video') {
-            this.setMode('video');
-        } else {
-            this.applyPreset(this.currentPresetId, false);
+        for (let i = 0; i < 2; i++) {
+            const layer = document.createElement('div');
+            Object.assign(layer.style, {
+                position: 'absolute',
+                inset: '0',
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                backgroundRepeat: 'no-repeat',
+                opacity: '0',
+                transition: 'opacity 1.2s ease',
+            });
+            root.appendChild(layer);
+            this.imageLayers.push(layer);
         }
-    }
 
-    private initVideoElement(): void {
-        if (!this.container || this.videoElement) return;
+        for (let i = 0; i < 2; i++) {
+            const v = document.createElement('video');
+            v.muted = true;
+            v.playsInline = true;
+            v.preload = 'auto';
+            v.setAttribute('muted', '');
+            v.setAttribute('playsinline', '');
+            Object.assign(v.style, {
+                position: 'absolute',
+                inset: '0',
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                opacity: '0',
+                display: 'none',
+            });
+            v.addEventListener('error', () => this.handleVideoError(v));
+            v.addEventListener('ended', () => {
+                // Dự phòng: nếu vì lý do nào đó chưa kịp hoà trộn thì tua về đầu đoạn
+                if (this.videos[this.activeVideo] === v && this.mode === 'video') {
+                    v.currentTime = this.currentVideo.loopStart ?? 0;
+                    void v.play().catch(() => undefined);
+                }
+            });
+            root.appendChild(v);
+            this.videos.push(v);
+        }
 
-        const v = document.createElement('video');
-        v.autoplay = true;
-        v.loop = true;
-        v.muted = true;
-        v.playsInline = true;
-        v.setAttribute('playsinline', '');
-        v.setAttribute('webkit-playsinline', '');
-        v.setAttribute('muted', '');
-        v.setAttribute('loop', '');
-        v.setAttribute('autoplay', '');
-        v.style.position = 'absolute';
-        v.style.top = '0';
-        v.style.left = '0';
-        v.style.width = '100%';
-        v.style.height = '100%';
-        v.style.objectFit = 'cover';
-        v.style.pointerEvents = 'none';
-        v.style.zIndex = '0';
-        v.style.display = this.mode === 'video' ? 'block' : 'none';
-
-        v.addEventListener('ended', () => {
-            if (this.autoNextVideo) {
-                this.playNextVideo();
-            }
+        // Video AI có sẵn một tờ giấy trắng vẽ ở nửa dưới; tờ giấy 3D che phần lớn,
+        // dải sương này che nốt phần mép đáy lộ ra dưới tờ giấy 3D.
+        const fog = document.createElement('div');
+        Object.assign(fog.style, {
+            position: 'absolute',
+            left: '0',
+            right: '0',
+            bottom: '0',
+            height: '14%',
+            zIndex: '3',
+            display: 'none',
+            background:
+                'linear-gradient(to bottom, rgba(226, 234, 243, 0) 0%, rgba(226, 234, 243, 0.85) 45%, rgba(232, 238, 246, 0.98) 100%)',
         });
+        root.appendChild(fog);
+        this.videoBottomFog = fog;
 
-        this.videoElement = v;
-        this.container.insertBefore(v, this.container.firstChild);
+        container.insertBefore(root, container.firstChild);
+        this.layerRoot = root;
 
-        // Nạp video vd1.mp4 của người dùng
-        this.applyVideo(this.currentVideoId);
+        this.showImage(this.getCurrentPreset().url, false);
+        this.loadVideoSources(this.currentVideo.url);
+        this.applyModeVisibility();
     }
 
-    public setMode(mode: 'image' | 'video'): void {
+    // ------------------------------------------------------------------ MODE
+
+    public setMode(mode: BackgroundMode): void {
+        if (this.mode === mode) return;
         this.mode = mode;
-        if (!this.container) return;
-
-        if (mode === 'video') {
-            if (this.videoElement) {
-                this.videoElement.style.display = 'block';
-                this.videoElement.play().catch(() => undefined);
-            }
-            if (this.scene) {
-                this.scene.background = null;
-            }
-            if (this.renderer) {
-                this.renderer.setClearColor(0x000000, 0);
-            }
-            this.container.style.backgroundImage = 'none';
-            this.container.style.backgroundColor = 'transparent';
-        } else {
-            if (this.videoElement) {
-                this.videoElement.style.display = 'none';
-                this.videoElement.pause();
-            }
-            this.applyPreset(this.currentPresetId, false);
-        }
+        this.applyModeVisibility();
+        this.onModeChanged?.(mode);
     }
 
-    public getMode(): 'image' | 'video' {
+    public getMode(): BackgroundMode {
         return this.mode;
     }
 
-    public applyVideo(videoId: string): void {
-        this.currentVideoId = videoId;
-        const preset = VIDEO_PRESETS.find((v) => v.id === videoId);
-        const url = preset?.url ?? '/backgrounds/vd1.mp4';
-
-        if (this.videoElement) {
-            this.videoElement.src = url;
-            this.videoElement.loop = !this.autoNextVideo;
-            if (this.mode === 'video') {
-                this.videoElement.play().catch(() => undefined);
+    private applyModeVisibility(): void {
+        const isVideo = this.mode === 'video';
+        this.imageLayers.forEach((layer, i) => {
+            layer.style.display = isVideo ? 'none' : 'block';
+            if (!isVideo) layer.style.opacity = i === this.activeImageLayer ? '1' : '0';
+        });
+        this.videos.forEach((v, i) => {
+            v.style.display = isVideo ? 'block' : 'none';
+            if (isVideo) {
+                v.style.transition = 'none';
+                v.style.opacity = i === this.activeVideo ? '1' : '0';
             }
+        });
+        if (this.videoBottomFog) this.videoBottomFog.style.display = isVideo ? 'block' : 'none';
+        const active = this.videos[this.activeVideo];
+        if (isVideo && active) {
+            void active.play().catch(() => undefined);
+        } else {
+            this.videos.forEach((v) => v.pause());
+            this.crossfading = false;
         }
+    }
+
+    // ----------------------------------------------------------------- IMAGE
+
+    private showImage(url: string, animated: boolean): void {
+        if (this.imageLayers.length < 2) return;
+        const next = animated ? 1 - this.activeImageLayer : this.activeImageLayer;
+        const nextLayer = this.imageLayers[next];
+        const prevLayer = this.imageLayers[1 - next];
+
+        nextLayer.style.transition = animated ? 'opacity 1.2s ease' : 'none';
+        prevLayer.style.transition = animated ? 'opacity 1.2s ease' : 'none';
+        nextLayer.style.backgroundImage = `url("${url}")`;
+        this.onImageChanged?.(url);
+
+        // Chờ ảnh tải xong rồi mới hoà trộn để không hiện khung trống
+        const img = new Image();
+        img.onload = img.onerror = () => {
+            nextLayer.style.opacity = '1';
+            if (animated) prevLayer.style.opacity = '0';
+        };
+        img.src = url;
+        this.activeImageLayer = next;
+    }
+
+    public applyPreset(presetId: string, animated = true): void {
+        const preset = BACKGROUND_PRESETS.find((p) => p.id === presetId) ?? BACKGROUND_PRESETS[0];
+        if (preset.id === this.currentPresetId && this.imageLayers[this.activeImageLayer]?.style.backgroundImage) {
+            return;
+        }
+        this.currentPresetId = preset.id;
+        this.showImage(preset.url, animated);
+    }
+
+    public applyCustomImage(dataUrl: string): void {
+        const customId = `custom-${Date.now()}`;
+        BACKGROUND_PRESETS.push({
+            id: customId,
+            name: 'Ảnh Bạn Vừa Tải',
+            url: dataUrl,
+            badge: '🖼️ TỰ CHỌN',
+        });
+        this.applyPreset(customId, true);
+        this.onBackgroundChanged?.(customId);
+    }
+
+    public nextBackground(): void {
+        const idx = BACKGROUND_PRESETS.findIndex((p) => p.id === this.currentPresetId);
+        const next = BACKGROUND_PRESETS[(idx + 1) % BACKGROUND_PRESETS.length];
+        this.applyPreset(next.id, true);
+        this.onBackgroundChanged?.(next.id);
+    }
+
+    // ----------------------------------------------------------------- VIDEO
+
+    private loadVideoSources(url: string): void {
+        this.crossfading = false;
+        this.activeVideo = 0;
+        const start = this.currentVideo.loopStart ?? 0;
+        this.videos.forEach((v, i) => {
+            v.src = url;
+            v.load();
+            v.style.transition = 'none';
+            v.style.opacity = i === 0 ? '1' : '0';
+            const seek = () => {
+                v.currentTime = start;
+            };
+            if (v.readyState >= 1) seek();
+            else v.addEventListener('loadedmetadata', seek, { once: true });
+        });
+        if (this.mode === 'video') {
+            void this.videos[0]?.play().catch(() => undefined);
+        }
+    }
+
+    public applyVideo(videoId: string): void {
+        const preset = VIDEO_PRESETS.find((v) => v.id === videoId) ?? VIDEO_PRESETS[0];
+        this.currentVideo = preset;
+        this.loadVideoSources(preset.url);
     }
 
     public getCurrentVideoId(): string {
-        return this.currentVideoId;
-    }
-
-    public setAutoNextVideo(enabled: boolean): void {
-        this.autoNextVideo = enabled;
-        if (this.videoElement) {
-            this.videoElement.loop = !enabled;
-        }
-    }
-
-    public getAutoNextVideo(): boolean {
-        return this.autoNextVideo;
-    }
-
-    public playNextVideo(): void {
-        const idx = VIDEO_PRESETS.findIndex((v) => v.id === this.currentVideoId);
-        const nextIdx = (idx + 1) % VIDEO_PRESETS.length;
-        this.applyVideo(VIDEO_PRESETS[nextIdx].id);
+        return this.currentVideo.id;
     }
 
     public setCustomVideo(fileOrUrl: File | string): void {
@@ -267,285 +316,84 @@ export class BackgroundManager {
             url = fileOrUrl;
         } else {
             url = URL.createObjectURL(fileOrUrl);
+            this.objectUrls.forEach((u) => URL.revokeObjectURL(u));
+            this.objectUrls = [url];
         }
-        if (this.videoElement) {
-            this.videoElement.src = url;
-            this.setMode('video');
-            this.videoElement.play().catch(() => undefined);
-        }
+        this.currentVideo = { id: 'custom', name: 'Video tự chọn', url, badge: '📁 TỰ CHỌN' };
+        this.loadVideoSources(url);
+        this.setMode('video');
     }
 
-    /**
-     * Đăng ký các đồ vật workshop (bàn gỗ, rãnh xẻ, bức tường gỗ, giá kệ, bảng dụng cụ, đèn bàn)
-     * để ẩn đi khi ở chế độ phong cảnh ngoài trời.
-     */
-    public registerWorkshopProps(props: THREE.Object3D[]): void {
-        this.workshopProps = props;
-        this.updateWorkshopPropsVisibility(this.getCurrentPreset()?.isOutdoor ?? false);
-    }
-
-    private updateWorkshopPropsVisibility(isOutdoor: boolean): void {
-        // Khi ở chế độ ngoài trời, ẩn toàn bộ đồ gỗ xưởng mộc để lộ toàn cảnh núi non phía sau
-        this.workshopProps.forEach((prop) => {
-            prop.visible = !isOutdoor;
-        });
-    }
-
-    /**
-     * Tạo texture dự phòng tuyệt đẹp bằng Canvas nếu file ảnh ngoài chưa sẵn sàng
-     */
-    private createProceduralSky(type: string): THREE.CanvasTexture {
-        const canvas = document.createElement('canvas');
-        canvas.width = 1024;
-        canvas.height = 1024;
-        const ctx = canvas.getContext('2d')!;
-
-        if (type === 'sunset-clouds') {
-            const grad = ctx.createLinearGradient(0, 0, 0, 1024);
-            grad.addColorStop(0, '#1e1b4b');
-            grad.addColorStop(0.3, '#701a75');
-            grad.addColorStop(0.55, '#ea580c');
-            grad.addColorStop(0.75, '#fb923c');
-            grad.addColorStop(1, '#fed7aa');
-            ctx.fillStyle = grad;
-            ctx.fillRect(0, 0, 1024, 1024);
-
-            // Mặt trời hoàng hôn
-            const sunGrad = ctx.createRadialGradient(650, 680, 10, 650, 680, 280);
-            sunGrad.addColorStop(0, '#fffbeb');
-            sunGrad.addColorStop(0.2, '#fde047');
-            sunGrad.addColorStop(0.5, 'rgba(249, 115, 22, 0.4)');
-            sunGrad.addColorStop(1, 'rgba(234, 88, 12, 0)');
-            ctx.fillStyle = sunGrad;
-            ctx.beginPath();
-            ctx.arc(650, 680, 280, 0, Math.PI * 2);
-            ctx.fill();
-        } else if (type === 'cozy-lofi') {
-            const grad = ctx.createLinearGradient(0, 0, 0, 1024);
-            grad.addColorStop(0, '#0f172a');
-            grad.addColorStop(0.5, '#1e1b4b');
-            grad.addColorStop(0.8, '#312e81');
-            grad.addColorStop(1, '#4338ca');
-            ctx.fillStyle = grad;
-            ctx.fillRect(0, 0, 1024, 1024);
-
-            // Các ngôi sao lấp lánh
-            ctx.fillStyle = '#ffffff';
-            for (let i = 0; i < 90; i++) {
-                const sx = Math.random() * 1024;
-                const sy = Math.random() * 600;
-                const sr = Math.random() * 2 + 1;
-                ctx.beginPath();
-                ctx.arc(sx, sy, sr, 0, Math.PI * 2);
-                ctx.fill();
-            }
-        } else if (type === 'cyberpunk') {
-            const grad = ctx.createLinearGradient(0, 0, 0, 1024);
-            grad.addColorStop(0, '#020617');
-            grad.addColorStop(0.5, '#0f172a');
-            grad.addColorStop(0.8, '#1e1b4b');
-            grad.addColorStop(1, '#083344');
-            ctx.fillStyle = grad;
-            ctx.fillRect(0, 0, 1024, 1024);
-
-            // Dải lưới laser tím xanh
-            ctx.strokeStyle = 'rgba(6, 182, 212, 0.25)';
-            ctx.lineWidth = 2;
-            for (let lx = 0; lx <= 1024; lx += 80) {
-                ctx.beginPath();
-                ctx.moveTo(lx, 600);
-                ctx.lineTo(lx, 1024);
-                ctx.stroke();
-            }
+    private handleVideoError(v: HTMLVideoElement): void {
+        if (this.videos[this.activeVideo] !== v) return;
+        console.warn(`[BackgroundManager] Không phát được video ${this.currentVideo.url}`);
+        if (this.currentVideo.id !== VIDEO_PRESETS[0].id) {
+            this.applyVideo(VIDEO_PRESETS[0].id);
         } else {
-            // Mountain mist procedural fallback
-            const grad = ctx.createLinearGradient(0, 0, 0, 1024);
-            grad.addColorStop(0, '#bae6fd');
-            grad.addColorStop(0.45, '#e0f2fe');
-            grad.addColorStop(0.8, '#cbd5e1');
-            grad.addColorStop(1, '#64748b');
-            ctx.fillStyle = grad;
-            ctx.fillRect(0, 0, 1024, 1024);
+            // Ngay cả video mặc định cũng lỗi -> quay về Cảnh sống để không bị màn hình đen
+            this.setMode('image');
         }
-
-        const tex = new THREE.CanvasTexture(canvas);
-        tex.colorSpace = THREE.SRGBColorSpace;
-        return tex;
     }
 
-    /**
-     * Tải texture ảnh nền hoặc dùng procedural canvas
-     */
-    private loadPresetTexture(preset: BackgroundPreset, onReady: (tex: THREE.Texture) => void): void {
-        if (!preset.url) {
-            onReady(this.createProceduralSky(preset.id));
-            return;
+    /** Hoà trộn chéo 2 thẻ video ở điểm lặp -> vòng lặp liền mạch không giật cảnh. */
+    private updateVideoLoop(delta: number): void {
+        const active = this.videos[this.activeVideo];
+        const standby = this.videos[1 - this.activeVideo];
+        if (!active || !standby || !active.duration || !isFinite(active.duration)) return;
+
+        const start = this.currentVideo.loopStart ?? 0;
+        const end = Math.min(this.currentVideo.loopEnd ?? active.duration, active.duration - 0.05);
+        const fade = Math.min(this.currentVideo.crossfade ?? DEFAULT_CROSSFADE, (end - start) / 3);
+
+        if (!this.crossfading && active.currentTime >= end - fade) {
+            this.crossfading = true;
+            this.crossfadeTimer = 0;
+            standby.currentTime = start;
+            void standby.play().catch(() => undefined);
+            standby.style.transition = 'none';
+            standby.style.opacity = '0';
+            // Đặt video mới lên trên rồi tăng dần độ hiện
+            standby.style.zIndex = '2';
+            active.style.zIndex = '1';
         }
 
-        if (this.textureCache.has(preset.url)) {
-            onReady(this.textureCache.get(preset.url)!);
-            return;
-        }
-
-        this.textureLoader.load(
-            preset.url,
-            (tex) => {
-                tex.colorSpace = THREE.SRGBColorSpace;
-                this.textureCache.set(preset.url!, tex);
-                onReady(tex);
-            },
-            undefined,
-            () => {
-                // Nếu không tải được ảnh file, dùng bộ tạo Canvas procedural
-                console.warn(`[BackgroundManager] Không tìm thấy ${preset.url}, dùng Canvas texture procedural`);
-                const fallbackTex = this.createProceduralSky(preset.id);
-                this.textureCache.set(preset.url!, fallbackTex);
-                onReady(fallbackTex);
-            }
-        );
-    }
-
-    /**
-     * Chuyển đổi sang một Background Preset
-     */
-    public applyPreset(presetId: string, animated = true): void {
-        const preset = BACKGROUND_PRESETS.find((p) => p.id === presetId) ?? BACKGROUND_PRESETS[0];
-        this.currentPresetId = preset.id;
-        this.updateWorkshopPropsVisibility(preset.isOutdoor);
-
-        // 1. Cập nhật nền CSS trên container (hiển thị lập tức, không phụ thuộc WebGL)
-        if (this.container) {
-            if (this.mode === 'video') {
-                this.container.style.backgroundImage = 'none';
-                this.container.style.backgroundColor = 'transparent';
-            } else if (preset.isOutdoor && preset.url) {
-                this.container.style.backgroundImage = `url("${preset.url}")`;
-                this.container.style.backgroundSize = 'cover';
-                this.container.style.backgroundPosition = 'center';
-                this.container.style.backgroundRepeat = 'no-repeat';
-            } else {
-                this.container.style.backgroundImage = 'none';
-                this.container.style.backgroundColor = preset.isOutdoor ? '#0a0c10' : '#0e0a07';
+        if (this.crossfading) {
+            this.crossfadeTimer += delta;
+            const t = Math.min(1, this.crossfadeTimer / fade);
+            const eased = t * t * (3 - 2 * t);
+            standby.style.opacity = eased.toFixed(3);
+            if (t >= 1) {
+                this.crossfading = false;
+                active.pause();
+                active.style.opacity = '0';
+                active.currentTime = start;
+                this.activeVideo = 1 - this.activeVideo;
             }
         }
-
-        // 2. Cập nhật Three.js scene.background (Chỉ áp dụng khi ở chế độ Image)
-        if (this.scene) {
-            if (this.mode === 'video') {
-                this.scene.background = null;
-                if (this.renderer) {
-                    this.renderer.setClearColor(0x000000, 0);
-                }
-            } else if (preset.isOutdoor) {
-                this.loadPresetTexture(preset, (newTex) => {
-                    if (this.scene && this.currentPresetId === preset.id && this.mode === 'image') {
-                        this.scene.background = newTex;
-                    }
-                });
-            } else {
-                this.scene.background = null;
-            }
-        }
-
-        if (!preset.isOutdoor) {
-            return;
-        }
-
-        this.loadPresetTexture(preset, (newTex) => {
-            if (!animated) {
-                const currentMat = this.quadA.material as THREE.MeshBasicMaterial;
-                currentMat.map = newTex;
-                currentMat.opacity = 1.0;
-                currentMat.needsUpdate = true;
-                (this.quadB.material as THREE.MeshBasicMaterial).opacity = 0.0;
-                this.activeQuadIndex = 0;
-                this.isCrossFading = false;
-                return;
-            }
-
-            // Bắt đầu Cross-Fade mượt mà giữa QuadA và QuadB
-            const nextQuad = this.activeQuadIndex === 0 ? this.quadB : this.quadA;
-            const nextMat = nextQuad.material as THREE.MeshBasicMaterial;
-            nextMat.map = newTex;
-            nextMat.opacity = 0.0;
-            nextMat.needsUpdate = true;
-
-            this.isCrossFading = true;
-            this.crossFadeProgress = 0.0;
-        });
     }
 
-    /**
-     * Nạp ảnh tự chọn của người dùng (Data URL từ file upload)
-     */
-    public applyCustomImage(dataUrl: string): void {
-        const customId = `custom-${Date.now()}`;
-        const customPreset: BackgroundPreset = {
-            id: customId,
-            name: 'Ảnh Bạn Vừa Tải',
-            url: dataUrl,
-            isOutdoor: true,
-            keyLightColor: 0xffedd5,
-            ambientColor: 0xe0f2fe,
-            badge: '🖼️ TỰ CHỌN',
-        };
-        BACKGROUND_PRESETS.unshift(customPreset);
-        this.applyPreset(customId, true);
-        this.onBackgroundChanged?.(customId);
-    }
+    // ---------------------------------------------------------------- UPDATE
 
-    /**
-     * Chuyển sang background tiếp theo trong danh sách
-     */
-    public nextBackground(): void {
-        const currentIdx = BACKGROUND_PRESETS.findIndex((p) => p.id === this.currentPresetId);
-        const nextIdx = (currentIdx + 1) % BACKGROUND_PRESETS.length;
-        const nextPreset = BACKGROUND_PRESETS[nextIdx];
-        this.applyPreset(nextPreset.id, true);
-        this.onBackgroundChanged?.(nextPreset.id);
-    }
-
-    /**
-     * Cập nhật tiến trình Cross-Fade và bộ đếm tự động xoay vòng trong Render Loop
-     */
     public update(delta: number): void {
-        // 1. Cập nhật hiệu ứng chuyển cảnh Cross-Fade
-        if (this.isCrossFading) {
-            this.crossFadeProgress += delta / this.crossFadeDuration;
-            const t = Math.min(1.0, this.crossFadeProgress);
-
-            const fromQuad = this.activeQuadIndex === 0 ? this.quadA : this.quadB;
-            const toQuad = this.activeQuadIndex === 0 ? this.quadB : this.quadA;
-
-            (fromQuad.material as THREE.MeshBasicMaterial).opacity = 1.0 - t;
-            (toQuad.material as THREE.MeshBasicMaterial).opacity = t;
-
-            if (this.crossFadeProgress >= 1.0) {
-                this.isCrossFading = false;
-                this.activeQuadIndex = this.activeQuadIndex === 0 ? 1 : 0;
-            }
+        if (this.mode === 'video') {
+            this.updateVideoLoop(delta);
         }
 
-        // 2. Bộ đếm thời gian tự động đổi cảnh (Auto-Rotate)
-        if (this.autoRotate) {
+        if (this.autoRotate && this.mode === 'image' && BACKGROUND_PRESETS.length > 1) {
             this.autoRotateTimer += delta;
             if (this.autoRotateTimer >= this.rotateIntervalSeconds) {
-                this.autoRotateTimer = 0.0;
+                this.autoRotateTimer = 0;
                 this.nextBackground();
             }
         }
     }
 
-    // =========================================================================
-    // CÁC HÀM GET / SET CẤU HÌNH
-    // =========================================================================
-
     public getCurrentPresetId(): string {
         return this.currentPresetId;
     }
 
-    public getCurrentPreset(): BackgroundPreset | undefined {
-        return BACKGROUND_PRESETS.find((p) => p.id === this.currentPresetId);
+    public getCurrentPreset(): BackgroundPreset {
+        return BACKGROUND_PRESETS.find((p) => p.id === this.currentPresetId) ?? BACKGROUND_PRESETS[0];
     }
 
     public setAutoRotate(enabled: boolean, intervalMinutes?: number): void {
@@ -553,25 +401,25 @@ export class BackgroundManager {
         if (intervalMinutes && intervalMinutes > 0) {
             this.rotateIntervalSeconds = intervalMinutes * 60;
         }
-        if (!enabled) {
-            this.autoRotateTimer = 0.0;
-        }
+        if (!enabled) this.autoRotateTimer = 0;
     }
 
     public getAutoRotate(): { enabled: boolean; intervalMinutes: number } {
-        return {
-            enabled: this.autoRotate,
-            intervalMinutes: Math.round(this.rotateIntervalSeconds / 60),
-        };
+        return { enabled: this.autoRotate, intervalMinutes: Math.round(this.rotateIntervalSeconds / 60) };
     }
 
     public dispose(): void {
-        this.quadA.geometry.dispose();
-        (this.quadA.material as THREE.Material).dispose();
-        this.quadB.geometry.dispose();
-        (this.quadB.material as THREE.Material).dispose();
-        this.textureCache.forEach((tex) => tex.dispose());
-        this.textureCache.clear();
+        this.videos.forEach((v) => {
+            v.pause();
+            v.removeAttribute('src');
+            v.load();
+        });
+        this.objectUrls.forEach((u) => URL.revokeObjectURL(u));
+        this.objectUrls = [];
+        this.layerRoot?.remove();
+        this.layerRoot = null;
+        this.videos = [];
+        this.imageLayers = [];
+        this.videoBottomFog = null;
     }
 }
-

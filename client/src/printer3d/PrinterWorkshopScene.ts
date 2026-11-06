@@ -1,15 +1,23 @@
 import * as THREE from 'three';
-import { createActionBadgesBar } from './workshopProps';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { SheetCanvasRenderer } from './sheetRenderer';
 import { SparkleParticleSystem } from './particles';
+import { createBrushedMetalTexture } from './textures';
 import { soundManager } from '../audio/SoundManager';
-import { BackgroundManager } from './backgroundManager';
+import { BackgroundManager, type BackgroundMode } from './backgroundManager';
 import { ButterflySystem } from './butterflySystem';
 import { BirdFlockSystem } from './birdFlockSystem';
 import { MistLayerSystem } from './mistLayerSystem';
 import { FallingLeavesSystem } from './FallingLeavesSystem';
+import { LivingBackground } from './livingBackground';
 import { mockPartialSheet } from './mockData';
 import type { Sheet, SheetEntry, PrinterStatus } from '../types';
+
+// Khung sắt: ray nằm sát ngoài 2 mép giấy (giấy rộng 2.05 -> mép ±1.025)
+const FRAME_RAIL_X = 1.1;
+const FRAME_RAIL_Y = 0.06;
+const FRAME_Z_START = -0.98;
+const FRAME_Z_END = 2.66;
 
 export class PrinterWorkshopScene {
     public container: HTMLElement;
@@ -19,6 +27,9 @@ export class PrinterWorkshopScene {
 
     // Component meshes
     public sheetRenderer: SheetCanvasRenderer;
+    /** Tờ trắng nằm sẵn bên dưới; khi đổi tờ chỉ kéo tờ trên xuống là lộ ra tờ này */
+    private underRenderer: SheetCanvasRenderer;
+    private underPaperMesh: THREE.Mesh;
     public paperMesh: THREE.Mesh;
     public printHeadGroup: THREE.Group;
     public printHeadLight: THREE.SpotLight;
@@ -31,15 +42,22 @@ export class PrinterWorkshopScene {
     public birdFlockSystem: BirdFlockSystem;
     public mistLayerSystem: MistLayerSystem;
     public fallingLeavesSystem: FallingLeavesSystem;
+    public livingBackground: LivingBackground;
 
     // Animation & control
     private animationFrameId: number | null = null;
-    private clock = new THREE.Clock();
+    private timer = new THREE.Timer();
+    private metalEnvMap: THREE.Texture | null = null;
+    private resizeObserver: ResizeObserver;
 
-    // Camera view targets (Chuẩn Livecade 9:16)
-    private currentTarget = new THREE.Vector3(0, 1.0, 0.3);
-    private desiredTarget = new THREE.Vector3(0, 1.0, 0.3);
-    private desiredCamPos = new THREE.Vector3(0, 4.3, 3.7);
+    // Lớp sinh vật/khí quyển gắn vào camera (xem backdrop.ts)
+    private backdropGroup = new THREE.Group();
+    private layerToggles = { butterflies: true, birds: true, leaves: true };
+
+    // Camera 9:16: khung hình chứa trọn tờ giấy (mép trên ~42%, mép dưới ~97% chiều cao)
+    private currentTarget = new THREE.Vector3(0, 1.0, 0.8);
+    private desiredTarget = new THREE.Vector3(0, 1.0, 0.8);
+    private desiredCamPos = new THREE.Vector3(0, 5.0, 5.1);
 
     // Trạng thái máy in
     private printerStatus: PrinterStatus = 'idle';
@@ -52,6 +70,7 @@ export class PrinterWorkshopScene {
     private printProgress = 0.0;
     private printDuration = 2.5; // giây
     private printElapsedTime = 0.0;
+    private printRedrawTimer = 0;
     private gleamProgress = 0.0;
     private onPrintCompleteCallback: (() => void) | null = null;
 
@@ -61,6 +80,13 @@ export class PrinterWorkshopScene {
     private ejectDuration = 1.4; // giây
     private nextSheetData: Sheet | null = null;
     private onEjectCompleteCallback: (() => void) | null = null;
+    /** Lệnh đổi tờ đến lúc bút còn đang vẽ: vẽ xong mới kéo tờ đi */
+    private pendingEject: { nextSheet: Sheet; onComplete?: () => void } | null = null;
+    /**
+     * Hàng đợi in: lệnh in mới không bao giờ ghi đè hình đang vẽ dở. Chờ vẽ xong / kéo tờ xong rồi vẽ tiếp,
+     * hình nào phải chờ thì vẽ nhanh hơn để bắt kịp nhịp server.
+     */
+    private printQueue: { special: boolean; entry: SheetEntry; duration: number; onComplete?: () => void; waited: number }[] = [];
 
     constructor(container: HTMLElement) {
         this.container = container;
@@ -70,7 +96,7 @@ export class PrinterWorkshopScene {
         this.scene.background = null;
 
         // 2. Camera chuẩn góc 9:16 (Livecade top-down isometric)
-        const aspect = container.clientWidth / container.clientHeight;
+        const aspect = Math.max(1, container.clientWidth) / Math.max(1, container.clientHeight);
         this.camera = new THREE.PerspectiveCamera(46, aspect, 0.1, 50);
         this.camera.position.copy(this.desiredCamPos);
         this.camera.lookAt(this.desiredTarget);
@@ -82,8 +108,11 @@ export class PrinterWorkshopScene {
             alpha: true,
         });
         this.renderer.setClearColor(0x000000, 0);
-        this.renderer.setSize(container.clientWidth, container.clientHeight);
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        // Render dày gấp 2 rồi trình duyệt thu nhỏ (supersampling) -> mép khung, chữ, avatar sắc nét
+        // kể cả khi OBS / TikTok LIVE Studio mở trang ở tỉ lệ 1:1. Có thể giảm bằng ?quality=1
+        const q = Number(new URLSearchParams(window.location.search).get('quality'));
+        this.renderer.setPixelRatio(q > 0 ? Math.min(q, 3) : Math.max(2, Math.min(window.devicePixelRatio, 3)));
+        this.renderer.setSize(Math.max(1, container.clientWidth), Math.max(1, container.clientHeight), false);
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFShadowMap;
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -103,19 +132,35 @@ export class PrinterWorkshopScene {
         // 4. Ánh sáng ấm cúng & Đèn bàn xưởng
         this.setupLighting();
 
-        // 5. Khởi tạo Background & Sinh vật tự nhiên
-        this.backgroundManager = new BackgroundManager();
-        this.backgroundManager.setSceneAndContainer(this.scene, container, this.renderer);
-        this.mistLayerSystem = new MistLayerSystem();
-        this.birdFlockSystem = new BirdFlockSystem();
-        this.butterflySystem = new ButterflySystem();
-        this.fallingLeavesSystem = new FallingLeavesSystem();
+        // Môi trường phản chiếu cho khung kim loại (không có thì kim loại trông đen kịt)
+        const pmrem = new THREE.PMREMGenerator(this.renderer);
+        // Chỉ gắn cho vật liệu khung (gắn vào scene.environment thì giấy bị chói trắng)
+        this.metalEnvMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+        pmrem.dispose();
 
-        this.scene.add(this.backgroundManager.group);
-        this.scene.add(this.mistLayerSystem.group);
-        this.scene.add(this.birdFlockSystem.group);
-        this.scene.add(this.butterflySystem.group);
-        this.scene.add(this.fallingLeavesSystem.group);
+        // 5. Lớp nền (ảnh/video DOM phía sau canvas) & sinh vật tự nhiên gắn vào camera
+        this.livingBackground = new LivingBackground(this.camera);
+        this.backgroundManager = new BackgroundManager();
+        this.backgroundManager.onImageChanged = (url) => this.livingBackground.setImage(url);
+        this.backgroundManager.onModeChanged = () => this.applyLayerVisibility();
+        this.backgroundManager.attach(container);
+
+        this.mistLayerSystem = new MistLayerSystem(this.camera);
+        this.birdFlockSystem = new BirdFlockSystem(this.camera);
+        this.butterflySystem = new ButterflySystem(this.camera);
+        this.fallingLeavesSystem = new FallingLeavesSystem(this.camera);
+
+        this.backdropGroup.name = 'Backdrop';
+        this.backdropGroup.add(
+            this.livingBackground.mesh,
+            this.mistLayerSystem.group,
+            this.birdFlockSystem.group,
+            this.butterflySystem.group,
+            this.fallingLeavesSystem.group
+        );
+        this.camera.add(this.backdropGroup);
+        this.scene.add(this.camera);
+        this.applyLayerVisibility();
 
         // 6. Môi trường (Bàn gỗ, Tường gỗ, Pegboard, Kệ đồ)
         this.setupEnvironment();
@@ -123,8 +168,13 @@ export class PrinterWorkshopScene {
         // 7. Tờ giấy in (Sheet Renderer)
         this.sheetRenderer = new SheetCanvasRenderer(1024, 1536);
         this.sheetRenderer.renderSheet(mockPartialSheet);
-        this.paperMesh = this.createPaperMesh();
+        this.paperMesh = this.createPaperMesh(this.sheetRenderer);
         this.scene.add(this.paperMesh);
+        this.underRenderer = new SheetCanvasRenderer(1024, 1536);
+        this.underPaperMesh = this.createPaperMesh(this.underRenderer);
+        this.underPaperMesh.position.y = -0.006; // ngay dưới tờ trên, không bị chồng hình
+        this.scene.add(this.underPaperMesh);
+        this.renderUnderSheet(mockPartialSheet.id + 1);
 
         // 8. Máy in dạng Plotter CNC mở
         const { gantry, printHead, printHeadLight } = this.createPlotterPrinter();
@@ -136,13 +186,10 @@ export class PrinterWorkshopScene {
         // 9. Hệ thống hạt lấp lánh (Sparkle Particle System)
         this.particles = new SparkleParticleSystem(this.scene);
 
-        // 10. Dải huy hiệu hành động nổi
-        const actionBadges = createActionBadgesBar();
-        this.scene.add(actionBadges);
-
         // 11. Resize listener
         this.onWindowResize = this.onWindowResize.bind(this);
-        window.addEventListener('resize', this.onWindowResize);
+        this.resizeObserver = new ResizeObserver(() => this.onWindowResize());
+        this.resizeObserver.observe(container);
 
         // 12. Render Loop
         this.startRenderLoop();
@@ -273,6 +320,18 @@ export class PrinterWorkshopScene {
         gantryGroup.position.set(0, 0, -0.65);
         gantryGroup.add(penGroup);
 
+        // ---- KHUNG SẮT ĐEN quanh tờ giấy (cố định). Cây bút tự di chuyển, không có thanh ngang ----
+        const frameMat = this.createFrameMaterial();
+        const trimMat = new THREE.MeshStandardMaterial({
+            color: 0xaeb6c2,
+            metalness: 0.7,
+            roughness: 0.25,
+            envMap: this.metalEnvMap,
+            envMapIntensity: 0.6,
+        });
+
+        this.scene.add(this.createFixedFrame(frameMat, trimMat));
+
         return {
             gantry: gantryGroup,
             printHead: penGroup,
@@ -280,7 +339,72 @@ export class PrinterWorkshopScene {
         };
     }
 
-    private createPaperMesh(): THREE.Mesh {
+    private createFrameMaterial(): THREE.MeshStandardMaterial {
+        const metal = createBrushedMetalTexture(512, 512, '#16191e');
+        metal.map.colorSpace = THREE.SRGBColorSpace;
+        return new THREE.MeshStandardMaterial({
+            color: 0x4a515c,
+            map: metal.map,
+            roughnessMap: metal.roughnessMap,
+            roughness: 0.42,
+            metalness: 0.55,
+            envMap: this.metalEnvMap,
+            envMapIntensity: 0.6,
+        });
+    }
+
+    /** Phần khung cố định: 2 ray dọc hai mép giấy, hộp nạp giấy phía trên, chân đỡ 4 góc. */
+    private createFixedFrame(frameMat: THREE.Material, trimMat: THREE.Material): THREE.Group {
+        const frame = new THREE.Group();
+        frame.name = 'PrinterFrame';
+        const railLen = FRAME_Z_END - FRAME_Z_START;
+        const railMidZ = (FRAME_Z_START + FRAME_Z_END) / 2;
+
+        for (const side of [-1, 1]) {
+            const rail = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.04, railLen), frameMat);
+            rail.position.set(side * FRAME_RAIL_X, FRAME_RAIL_Y - 0.025, railMidZ);
+            rail.castShadow = true;
+            rail.receiveShadow = true;
+            frame.add(rail);
+
+            // Thanh dẫn hướng sáng bóng trên mặt ray
+            const guide = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, railLen, 12), trimMat);
+            guide.rotation.x = Math.PI / 2;
+            guide.position.set(side * FRAME_RAIL_X, FRAME_RAIL_Y + 0.01, railMidZ);
+            frame.add(guide);
+
+            for (const z of [FRAME_Z_START, FRAME_Z_END]) {
+                const foot = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.08, 0.09), frameMat);
+                foot.position.set(side * FRAME_RAIL_X, FRAME_RAIL_Y - 0.03, z);
+                foot.castShadow = true;
+                frame.add(foot);
+                const bolt = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.012, 12), trimMat);
+                bolt.position.set(side * FRAME_RAIL_X, FRAME_RAIL_Y + 0.026, z);
+                frame.add(bolt);
+            }
+        }
+
+        // Hộp nạp giấy phía trên (giấy chui ra từ khe này)
+        const housingW = FRAME_RAIL_X * 2 + 0.12;
+        const housing = new THREE.Mesh(new THREE.BoxGeometry(housingW, 0.09, 0.12), frameMat);
+        housing.position.set(0, 0.15, FRAME_Z_START);
+        housing.castShadow = true;
+        frame.add(housing);
+        const slot = new THREE.Mesh(new THREE.BoxGeometry(housingW - 0.3, 0.012, 0.004), new THREE.MeshBasicMaterial({ color: 0x050608 }));
+        slot.position.set(0, 0.125, FRAME_Z_START + 0.062);
+        frame.add(slot);
+        const housingTrim = new THREE.Mesh(new THREE.BoxGeometry(housingW - 0.02, 0.008, 0.004), trimMat);
+        housingTrim.position.set(0, 0.185, FRAME_Z_START + 0.062);
+        frame.add(housingTrim);
+
+        return frame;
+    }
+
+    private renderUnderSheet(id: number): void {
+        this.underRenderer.renderSheet({ id, kind: 'standard', capacity: 4, entries: [], completed: false });
+    }
+
+    private createPaperMesh(renderer: SheetCanvasRenderer): THREE.Mesh {
         const paperWidth = 2.05;
         const paperLength = 3.4;
 
@@ -299,11 +423,17 @@ export class PrinterWorkshopScene {
         }
         geo.computeVertexNormals();
 
+        // Giấy tự phát sáng một phần theo chính texture -> trắng sáng, chữ/ảnh rõ, không bị xám đục vì tone mapping
         const mat = new THREE.MeshStandardMaterial({
-            map: this.sheetRenderer.texture,
-            roughness: 0.88,
-            metalness: 0.02,
+            map: renderer.texture,
+            emissive: 0xffffff,
+            emissiveMap: renderer.texture,
+            emissiveIntensity: 0.55,
+            color: 0xb8b8b8,
+            roughness: 0.92,
+            metalness: 0,
             side: THREE.DoubleSide,
+            toneMapped: false,
         });
 
         const paperMesh = new THREE.Mesh(geo, mat);
@@ -314,10 +444,35 @@ export class PrinterWorkshopScene {
     }
 
     public updateSheet(sheet: Sheet): void {
-        this.currentSheet = sheet;
-        if (!this.isPrintingActive) {
-            this.sheetRenderer.renderSheet(sheet);
+        // Đang kéo tờ cũ đi: dữ liệu tờ mới hiện ngay lên tờ bên dưới
+        if (this.isEjecting || this.pendingEject) {
+            if (this.currentSheet && sheet.id === this.currentSheet.id) {
+                // cập nhật cuối của tờ cũ: chỉ lưu khi chưa bắt đầu kéo
+                if (!this.isEjecting) this.currentSheet = this.withActiveEntry(sheet);
+                return;
+            }
+            this.nextSheetData = sheet;
+            this.underRenderer.renderSheet(this.visible(sheet));
+            return;
         }
+        const idChanged = !this.currentSheet || this.currentSheet.id !== sheet.id;
+        this.currentSheet = this.withActiveEntry(sheet);
+        if (idChanged) this.renderUnderSheet(sheet.id + 1);
+        if (!this.isPrintingActive) {
+            this.sheetRenderer.renderSheet(this.visible(this.currentSheet));
+        }
+    }
+
+    /**
+     * Server có thể gửi bản cập nhật tờ giấy chưa có avatar vừa in xong (hoặc đến trễ).
+     * Giữ lại avatar đã in trên cùng tờ để hình trước không bao giờ bị mất khi đang vẽ hình sau.
+     */
+    private withActiveEntry(sheet: Sheet): Sheet {
+        const prev = this.currentSheet;
+        if (!prev || prev.id !== sheet.id || prev.kind !== sheet.kind) return sheet;
+        const missing = prev.entries.filter((e) => !sheet.entries.some((n) => n.slot === e.slot));
+        if (missing.length === 0) return sheet;
+        return { ...sheet, entries: [...sheet.entries, ...missing].sort((a, b) => a.slot - b.slot) };
     }
 
     public getPrinterStatus(): PrinterStatus {
@@ -341,8 +496,8 @@ export class PrinterWorkshopScene {
 
     public setCameraPreset(preset: 'stream' | 'closeup' | 'overview'): void {
         if (preset === 'stream') {
-            this.desiredCamPos.set(0, 4.3, 3.7);
-            this.desiredTarget.set(0, 1.0, 0.3);
+            this.desiredCamPos.set(0, 5.0, 5.1);
+            this.desiredTarget.set(0, 1.0, 0.8);
         } else if (preset === 'closeup') {
             this.desiredCamPos.set(0, 2.8, 2.5);
             this.desiredTarget.set(0, 0.3, 0.9);
@@ -364,6 +519,11 @@ export class PrinterWorkshopScene {
         durationSeconds = 2.4,
         onComplete?: () => void
     ): void {
+        this.printQueue.push({ special: false, entry, duration: durationSeconds, onComplete, waited: 0 });
+        this.advance();
+    }
+
+    private beginPrintSlot(entry: SheetEntry, durationSeconds: number, onComplete?: () => void): void {
         this.isPrintingActive = true;
         this.activeSlot = entry.slot;
         this.activeEntry = entry;
@@ -376,10 +536,10 @@ export class PrinterWorkshopScene {
         this.setPrinterStatus('printing');
 
         // Bật âm thanh máy in (âm motor bước + kim nhiệt)
-        soundManager.startPrintSound(entry.frame === 'gold');
+        soundManager.startPrintSound(entry.frame !== 'normal');
 
         // Cài đặt màu đèn đầu in phù hợp với khung
-        if (entry.frame === 'gold') {
+        if (entry.frame !== 'normal') {
             this.printHeadLight.color.setHex(0xfbbf24);
             this.printHeadLight.intensity = 6.0;
         } else {
@@ -396,6 +556,11 @@ export class PrinterWorkshopScene {
         durationSeconds = 3.5,
         onComplete?: () => void
     ): void {
+        this.printQueue.push({ special: true, entry, duration: durationSeconds, onComplete, waited: 0 });
+        this.advance();
+    }
+
+    private beginPrintSpecial(entry: SheetEntry, durationSeconds: number, onComplete?: () => void): void {
         this.isPrintingActive = true;
         this.activeSlot = 0;
         this.activeEntry = entry;
@@ -413,13 +578,52 @@ export class PrinterWorkshopScene {
     }
 
     /**
+     * Điều phối duy nhất: rảnh tay thì quyết định việc tiếp theo.
+     * - Còn hình thuộc TỜ HIỆN TẠI chưa vẽ -> vẽ nốt trước, rồi mới kéo tờ đi.
+     * - Có lệnh kéo tờ -> kéo tờ; các hình của tờ mới chờ kéo xong mới vẽ.
+     */
+    private advance(): void {
+        if (this.isPrintingActive || this.isEjecting) return;
+        const next = this.printQueue[0];
+        if (this.pendingEject) {
+            const forCurrentSheet = next?.entry.sheetId != null && next.entry.sheetId === this.currentSheet?.id;
+            if (!forCurrentSheet) {
+                const ej = this.pendingEject;
+                this.pendingEject = null;
+                this.beginEject(ej.nextSheet, ej.onComplete);
+                return;
+            }
+        }
+        if (!next) return;
+        this.printQueue.shift();
+        // Hình phải chờ lâu thì vẽ nhanh hơn để bắt kịp nhịp server
+        const duration = Math.max(0.8, next.duration - next.waited);
+        if (next.special) this.beginPrintSpecial(next.entry, duration, next.onComplete);
+        else this.beginPrintSlot(next.entry, duration, next.onComplete);
+    }
+
+    /** Ẩn các avatar server đã báo nhưng chưa tới lượt bút vẽ (tránh hiện sẵn rồi bị vẽ lại) */
+    private visible(sheet: Sheet): Sheet {
+        if (this.printQueue.length === 0) return sheet;
+        const waiting = new Set(this.printQueue.map((q) => q.entry.jobId));
+        return { ...sheet, entries: sheet.entries.filter((e) => !waiting.has(e.jobId)) };
+    }
+
+    /**
      * Kích hoạt hoạt ảnh cuộn tờ giấy cũ ra ngoài và nạp tờ mới vào
      */
     public startEjectSheetAnimation(nextSheet: Sheet, onComplete?: () => void): void {
+        this.pendingEject = { nextSheet, onComplete };
+        this.advance();
+    }
+
+    private beginEject(nextSheet: Sheet, onComplete?: () => void): void {
         this.isEjecting = true;
         this.ejectProgress = 0.0;
-        this.nextSheetData = nextSheet;
+        // Tờ mới thật từ server có thể đã đến trước (lúc chờ bút vẽ xong) -> ưu tiên dùng
+        this.nextSheetData = this.nextSheetData ?? nextSheet;
         this.onEjectCompleteCallback = onComplete ?? null;
+        this.underRenderer.renderSheet(this.visible(this.nextSheetData));
 
         // Âm thanh cuộn giấy xoẹt qua
         soundManager.playPaperRoll();
@@ -510,21 +714,25 @@ export class PrinterWorkshopScene {
         this.printProgress = Math.min(1.0, this.printElapsedTime / this.printDuration);
 
         // Hiệu ứng quét ánh kim viền vàng khi tiến độ > 0.8
-        if (this.activeEntry.frame === 'gold' && this.printProgress > 0.8) {
+        if (this.activeEntry.frame !== 'normal' && this.printProgress > 0.8) {
             this.gleamProgress = (this.printProgress - 0.8) / 0.2;
         }
 
-        // Vẽ lại canvas texture với tiến trình cắt dòng
-        this.sheetRenderer.renderSheetProgress(
-            this.currentSheet,
-            this.activeSlot,
-            this.printProgress,
-            this.activeEntry,
-            this.gleamProgress
-        );
+        // Vẽ lại canvas texture với tiến trình cắt dòng (tối đa 30 lần/giây: mỗi lần phải tải cả tờ lên GPU)
+        this.printRedrawTimer += delta;
+        if (this.printRedrawTimer >= 1 / 30 || this.printProgress >= 1) {
+            this.printRedrawTimer = 0;
+            this.sheetRenderer.renderSheetProgress(
+                this.visible(this.currentSheet),
+                this.activeSlot,
+                this.printProgress,
+                this.activeEntry,
+                this.gleamProgress
+            );
+        }
 
         const isSpecial = this.currentSheet.kind === 'special';
-        const isWide = Boolean(this.activeEntry.isWide || this.activeEntry.frame === 'gold');
+        const isWide = Boolean(this.activeEntry.isWide || this.activeEntry.frame !== 'normal');
         const targets = this.getSlotPrintheadTargets(this.activeSlot, this.printProgress, isSpecial, isWide);
 
         // 1. Chuyển động cây bút dọc theo trục Z bám sát scanline từ trên xuống dưới
@@ -554,11 +762,25 @@ export class PrinterWorkshopScene {
             if (isSpecial) {
                 soundManager.playGoldChime();
                 this.particles.burstGrandCelebration(new THREE.Vector3(0, 0.05, 0.8));
+            } else if (this.activeEntry.frame === 'vip') {
+                // VIP: chuông + pháo hoa ánh kim lớn ngay tại avatar
+                soundManager.playGoldChime();
+                this.particles.burstGrandCelebration(this.getSlotWorldPosition(this.activeSlot, true));
             } else if (this.activeEntry.frame === 'gold' || isWide) {
                 soundManager.playGoldChime();
                 const burstPos = this.getSlotWorldPosition(this.activeSlot, isWide);
                 this.particles.burstGoldSparkles(burstPos, 65);
             }
+
+            // Ghi avatar vừa in vào tờ hiện tại để các lần vẽ lại sau vẫn còn nó
+            const done: SheetEntry = { ...this.activeEntry, isWide: this.activeEntry.isWide ?? this.activeEntry.frame !== 'normal' };
+            if (this.currentSheet.kind !== 'special' && !this.currentSheet.entries.some((e) => e.slot === done.slot)) {
+                this.currentSheet = {
+                    ...this.currentSheet,
+                    entries: [...this.currentSheet.entries, done].sort((a, b) => a.slot - b.slot),
+                };
+            }
+            this.sheetRenderer.renderSheet(this.visible(this.currentSheet));
 
             // Gọi callback hoàn tất
             const cb = this.onPrintCompleteCallback;
@@ -566,51 +788,41 @@ export class PrinterWorkshopScene {
             this.activeSlot = null;
             this.activeEntry = null;
             cb?.();
+
+            this.advance();
         }
     }
 
     /**
-     * Cập nhật tiến trình đẩy giấy ra và nạp giấy mới trong Render Loop
+     * Đổi tờ: tờ trên cùng bị kéo trượt xuống dưới khỏi khung hình, lộ ra tờ trắng nằm sẵn bên dưới.
      */
     private updateEjectAnimation(delta: number): void {
         if (!this.isEjecting) return;
 
-        this.ejectProgress += delta / this.ejectDuration;
+        this.ejectProgress = Math.min(1, this.ejectProgress + delta / this.ejectDuration);
+        const t = this.ejectProgress;
+        // Giật nhẹ lúc đầu rồi tăng tốc như bị kéo tay
+        const pull = t * t * (2.2 - 1.2 * t);
+        this.paperMesh.position.z = 0.85 + pull * 4.6;
+        this.paperMesh.position.y = 0.004 + Math.sin(t * Math.PI) * 0.03;
 
-        // Nửa đầu (0.0 -> 0.5): Tờ giấy cũ trượt vút về phía trước rơi khỏi bàn
-        if (this.ejectProgress < 0.5) {
-            const t = this.ejectProgress * 2; // 0 -> 1
-            // Trượt từ 0.85 -> 4.5
-            this.paperMesh.position.z = 0.85 + Math.pow(t, 2) * 3.65;
-            // Rơi nghiêng xuống mép bàn
-            this.paperMesh.position.y = -Math.pow(t, 2) * 0.9;
-        }
-        // Giữa chặng (0.5): Đổi dữ liệu sang tờ mới và đặt ở vị trí sau khe dầm
-        else if (this.ejectProgress >= 0.5 && this.nextSheetData) {
-            this.currentSheet = this.nextSheetData;
-            this.sheetRenderer.renderSheet(this.nextSheetData);
-            this.nextSheetData = null; // Chỉ đổi 1 lần
-
-            this.paperMesh.position.z = -1.2;
-            this.paperMesh.position.y = 0.015;
-        }
-        // Nửa sau (0.5 -> 1.0): Tờ mới chui từ khe máy in trượt vào vị trí chuẩn
-        else {
-            const t = (this.ejectProgress - 0.5) * 2; // 0 -> 1
-            // Trượt từ -1.2 -> 0.85
-            const easeOut = 1 - Math.pow(1 - t, 3);
-            this.paperMesh.position.z = -1.2 + easeOut * 2.05;
-            this.paperMesh.position.y = 0.015;
-        }
-
-        // Hoàn tất cuộn giấy
-        if (this.ejectProgress >= 1.0) {
+        if (t >= 1) {
+            const next = this.nextSheetData;
+            if (next) {
+                this.currentSheet = next;
+                // Tờ trên nhận nội dung tờ dưới rồi về chỗ cũ (giống hệt nên không thấy chuyển cảnh)
+                this.sheetRenderer.renderSheet(this.visible(next));
+                this.renderUnderSheet(next.id + 1);
+            }
+            this.nextSheetData = null;
             this.isEjecting = false;
             this.paperMesh.position.set(0, 0, 0.85);
 
             const cb = this.onEjectCompleteCallback;
             this.onEjectCompleteCallback = null;
             cb?.();
+
+            this.advance();
         }
     }
 
@@ -621,8 +833,12 @@ export class PrinterWorkshopScene {
         const animate = () => {
             this.animationFrameId = requestAnimationFrame(animate);
 
-            const delta = this.clock.getDelta();
-            const time = this.clock.getElapsedTime();
+            this.timer.update();
+            // Giới hạn delta: khi tab/OBS bị ẩn rồi hiện lại không bị "nhảy cóc" hoạt ảnh
+            const delta = Math.min(this.timer.getDelta(), 0.1);
+            const time = this.timer.getElapsed();
+
+            for (const q of this.printQueue) q.waited += delta;
 
             // 1. Cập nhật hoạt ảnh in avatar
             if (this.isPrintingActive) {
@@ -653,10 +869,11 @@ export class PrinterWorkshopScene {
 
             // 3. Cập nhật nền, mây mù, đàn chim, đàn bướm và lá rơi
             this.backgroundManager.update(delta);
-            this.mistLayerSystem.update(delta);
+            this.livingBackground.update(delta, time);
+            this.mistLayerSystem.update(delta, time);
             this.birdFlockSystem.update(delta, time);
             this.butterflySystem.update(delta, time);
-            this.fallingLeavesSystem.update(delta);
+            this.fallingLeavesSystem.update(delta, time);
 
             // 4. Cập nhật hạt ánh kim / pháo hoa
             this.particles.update(delta);
@@ -676,7 +893,7 @@ export class PrinterWorkshopScene {
         this.backgroundManager.applyPreset(presetId, true);
     }
 
-    public setBackgroundMode(mode: 'image' | 'video'): void {
+    public setBackgroundMode(mode: BackgroundMode): void {
         this.backgroundManager.setMode(mode);
     }
 
@@ -688,7 +905,7 @@ export class PrinterWorkshopScene {
         this.backgroundManager.setCustomVideo(fileOrUrl);
     }
 
-    public getBackgroundMode(): 'image' | 'video' {
+    public getBackgroundMode(): BackgroundMode {
         return this.backgroundManager.getMode();
     }
 
@@ -701,11 +918,23 @@ export class PrinterWorkshopScene {
     }
 
     public setCreaturesVisible(butterflies: boolean, birds: boolean, leaves?: boolean): void {
-        this.butterflySystem.setVisible(butterflies);
-        this.birdFlockSystem.setVisible(birds);
-        if (leaves !== undefined) {
-            this.fallingLeavesSystem.setVisible(leaves);
-        }
+        this.layerToggles.butterflies = butterflies;
+        this.layerToggles.birds = birds;
+        if (leaves !== undefined) this.layerToggles.leaves = leaves;
+        this.applyLayerVisibility();
+    }
+
+    /**
+     * Video AI đã có sẵn chim/lá/bướm/mây riêng -> chỉ bật các lớp 3D ở chế độ Cảnh sống (ảnh tĩnh),
+     * tránh cảnh chim 3D bay chồng lên chim trong video.
+     */
+    private applyLayerVisibility(): void {
+        const live = this.backgroundManager.getMode() === 'image';
+        this.livingBackground.setEnabled(live);
+        this.mistLayerSystem.setVisible(live);
+        this.butterflySystem.setVisible(live && this.layerToggles.butterflies);
+        this.birdFlockSystem.setVisible(live && this.layerToggles.birds);
+        this.fallingLeavesSystem.setVisible(live && this.layerToggles.leaves);
     }
 
     public triggerBirdFlock(): void {
@@ -716,11 +945,12 @@ export class PrinterWorkshopScene {
         if (!this.container) return;
         const width = this.container.clientWidth;
         const height = this.container.clientHeight;
+        if (width === 0 || height === 0) return;
 
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
 
-        this.renderer.setSize(width, height);
+        this.renderer.setSize(width, height, false);
     }
 
     public dispose(): void {
@@ -728,17 +958,32 @@ export class PrinterWorkshopScene {
         if (this.animationFrameId !== null) {
             cancelAnimationFrame(this.animationFrameId);
         }
-        window.removeEventListener('resize', this.onWindowResize);
+        this.resizeObserver.disconnect();
 
         this.backgroundManager.dispose();
         this.butterflySystem.dispose();
         this.birdFlockSystem.dispose();
         this.mistLayerSystem.dispose();
+        this.livingBackground.dispose();
         this.fallingLeavesSystem.dispose();
         this.particles.dispose();
+        this.sheetRenderer.texture.dispose();
+        this.paperMesh.geometry.dispose();
+        (this.paperMesh.material as THREE.Material).dispose();
+        this.underRenderer.texture.dispose();
+        this.underPaperMesh.geometry.dispose();
+        (this.underPaperMesh.material as THREE.Material).dispose();
+        this.timer.dispose();
+        this.metalEnvMap?.dispose();
         this.renderer.dispose();
         if (this.renderer.domElement.parentElement) {
             this.renderer.domElement.parentElement.removeChild(this.renderer.domElement);
         }
     }
+}
+
+// Khi phát triển: code scene (hoặc chim, lá, giấy...) thay đổi thì tải lại trang,
+// vì scene đang chạy là bản tạo từ lúc mở trang và sẽ không tự cập nhật logic mới.
+if (import.meta.hot) {
+    import.meta.hot.accept(() => window.location.reload());
 }

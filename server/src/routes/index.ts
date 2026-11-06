@@ -2,7 +2,7 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import type { Core } from '../app.js';
 import type { NewEventInput } from '../events/eventHandler.js';
 import { config } from '../config.js';
-import { saveSettings, getBackgroundConfig } from '../settings.js';
+import { saveSettings, getBackgroundConfig, getAudioConfig } from '../settings.js';
 
 class HttpError extends Error {
     constructor(
@@ -165,6 +165,23 @@ export const createRouter = (core: Core): Router => {
 
         saveSettings({ background: updated });
         (core.bus as unknown as NodeJS.EventEmitter).emit('background:sync', updated);
+        res.json(updated);
+    });
+
+    // --- Âm lượng (đồng bộ tới overlay OBS) ---
+    router.get('/config/audio', (_req, res) => {
+        res.json(getAudioConfig());
+    });
+    router.put('/config/audio', (req, res) => {
+        if (!isRecord(req.body)) throw new HttpError(400, 'Body phải là JSON object');
+        const current = getAudioConfig();
+        const vol = (key: string, fallback: number): number => {
+            const v = req.body[key];
+            return typeof v === 'number' && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : fallback;
+        };
+        const updated = { sfxVolume: vol('sfxVolume', current.sfxVolume), bgmVolume: vol('bgmVolume', current.bgmVolume) };
+        saveSettings({ audio: updated });
+        (core.bus as unknown as NodeJS.EventEmitter).emit('audio:sync', updated);
         res.json(updated);
     });
 

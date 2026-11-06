@@ -2,64 +2,153 @@ import * as THREE from 'three';
 import type { Sheet, SheetEntry } from '../types';
 
 /**
- * Quản lý vẽ và cập nhật bề mặt tờ giấy in (CanvasTexture)
- * Hỗ trợ in 6 ô avatar, hiệu ứng quét từng dòng (scanline/dither) theo thời gian thực,
- * viền vàng VIP lấp lánh và trang đặc biệt Full Page.
+ * Mức trang trí của một ô in. Dù ở mức nào, nội dung chỉ gồm AVATAR + TÊN:
+ * - normal: avatar viền trắng, tên chữ màu.
+ * - gold (quà ≥ 100 kim cương / quà to chiếm nguyên hàng): thêm khung vàng trang trí quanh avatar, tên chữ vàng.
+ * - legend (trang đặc biệt ≥ 1000 kim cương): khung vàng lớn nhất có vương miện và cành nguyệt quế.
+ */
+type Tier = 'normal' | 'gold' | 'legend';
+
+const TEST_AVATAR_COUNT = 12;
+// Baloo 2: chữ tròn, đậm, rất dễ đọc, đủ dấu tiếng Việt (SIL OFL)
+const NAME_FONT = 'Baloo 2';
+const NAME_WEIGHT = 700;
+const NAME_FONT_STACK = `"${NAME_FONT}", "Segoe UI", "Arial Rounded MT Bold", Arial, sans-serif`;
+
+let nameFontPromise: Promise<void> | null = null;
+
+/** Nạp font viết tay cho tên (đóng gói sẵn trong /public/fonts nên OBS chạy offline vẫn có). */
+function loadNameFont(): Promise<void> {
+    if (!nameFontPromise) {
+        const face = new FontFace(NAME_FONT, 'url(/fonts/Baloo2-Variable.ttf)', { weight: '400 800' });
+        nameFontPromise = face
+            .load()
+            .then((loaded) => {
+                document.fonts.add(loaded);
+            })
+            .catch(() => {
+                console.warn('[SheetRenderer] Không tải được font Baloo 2, dùng font dự phòng');
+            });
+    }
+    return nameFontPromise;
+}
+
+/** Avatar dự phòng (khi người xem không có ảnh): luôn cùng một hình cho cùng một tên. */
+export function fallbackAvatarUrl(username: string): string {
+    let hash = 0;
+    for (let i = 0; i < username.length; i++) {
+        hash = (hash * 31 + username.charCodeAt(i)) | 0;
+    }
+    const idx = (Math.abs(hash) % TEST_AVATAR_COUNT) + 1;
+    return `/avatars/avatar-${String(idx).padStart(2, '0')}.svg`;
+}
+
+type RenderArgs = [Sheet, number | null, number, SheetEntry | undefined, number];
+
+/**
+ * Vẽ bề mặt tờ giấy in (CanvasTexture) gồm lưới 4 ô (2 hàng x 2 cột), hàng quà to và trang đặc biệt,
+ * kèm hiệu ứng in dần từng dòng theo tiến độ.
  */
 export class SheetCanvasRenderer {
     public canvas: HTMLCanvasElement;
     public ctx: CanvasRenderingContext2D;
     public texture: THREE.CanvasTexture;
 
-    // Cache avatar image element để không tải lại liên tục
     private imageCache = new Map<string, HTMLImageElement>();
+    private loading = new Set<string>();
+    private paperBase: HTMLCanvasElement;
+    private lastArgs: RenderArgs | null = null;
+    private redrawQueued = false;
+    /** Kích thước logic (toạ độ bố cục) — canvas thật lớn hơn `scale` lần cho chữ/ảnh sắc nét */
+    private W: number;
+    private H: number;
+    private scale: number;
 
-    constructor(width = 1024, height = 1536) {
+    constructor(width = 1024, height = 1536, scale = 1.5) {
+        this.W = width;
+        this.H = height;
+        this.scale = scale;
         this.canvas = document.createElement('canvas');
-        this.canvas.width = width;
-        this.canvas.height = height;
+        this.canvas.width = Math.round(width * scale);
+        this.canvas.height = Math.round(height * scale);
         const ctx = this.canvas.getContext('2d');
         if (!ctx) throw new Error('Cannot get 2D context');
         this.ctx = ctx;
+        ctx.setTransform(scale, 0, 0, scale, 0, 0);
 
         this.texture = new THREE.CanvasTexture(this.canvas);
+        this.texture.colorSpace = THREE.SRGBColorSpace;
+        this.texture.anisotropy = 16;
         this.texture.generateMipmaps = true;
         this.texture.minFilter = THREE.LinearMipmapLinearFilter;
         this.texture.magFilter = THREE.LinearFilter;
+
+        // Vân giấy vẽ 1 lần (trước đây random mỗi khung hình nên giấy bị nhấp nháy khi in)
+        this.paperBase = this.createPaperBase(width, height);
+
+        void loadNameFont().then(() => this.queueRedraw());
     }
 
-    /**
-     * Tải trước avatar ảnh và trigger render lại khi tải xong
-     */
+    // ------------------------------------------------------------------ ẢNH AVATAR
+
     public preloadAvatar(url: string, onLoaded?: () => void): void {
-        if (!url || this.imageCache.has(url)) return;
+        if (!url || this.imageCache.has(url) || this.loading.has(url)) return;
+        this.loading.add(url);
         const img = new Image();
         img.crossOrigin = 'anonymous';
         // Avatar TikTok đi qua proxy của server (CDN không có CORS)
         const remote = /^https?:\/\/(?!localhost)/.test(url) && !url.includes('/api/avatar');
-        const serverUrl = (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_SERVER_URL ?? `${window.location.protocol}//${window.location.hostname}:3001`;
-        const src = remote ? `${serverUrl}/api/avatar?url=${encodeURIComponent(url)}` : url;
+        const serverUrl =
+            (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_SERVER_URL ??
+            `${window.location.protocol}//${window.location.hostname}:3001`;
+        img.src = remote ? `${serverUrl}/api/avatar?url=${encodeURIComponent(url)}` : url;
         img.onload = () => {
+            this.loading.delete(url);
             this.imageCache.set(url, img);
             onLoaded?.();
+            this.queueRedraw();
         };
-        img.src = src;
+        img.onerror = () => {
+            // Ảnh lỗi -> nhớ lại bằng ảnh dự phòng để không thử tải lại liên tục
+            this.loading.delete(url);
+            const fb = fallbackAvatarUrl(url);
+            if (fb !== url) {
+                this.preloadAvatar(fb, () => {
+                    const fbImg = this.imageCache.get(fb);
+                    if (fbImg) this.imageCache.set(url, fbImg);
+                });
+            }
+        };
     }
 
-    /**
-     * Vẽ toàn bộ tờ giấy dựa vào dữ liệu Sheet (chế độ tĩnh hoàn tất)
-     */
+    private getAvatarImage(entry: SheetEntry): HTMLImageElement | null {
+        const url = entry.avatarUrl || fallbackAvatarUrl(entry.username);
+        const img = this.imageCache.get(url);
+        if (img) return img;
+        this.preloadAvatar(url);
+        return null;
+    }
+
+    /** Vẽ lại lần gần nhất khi ảnh/font tải xong (gộp nhiều lần tải trong 1 khung hình). */
+    private queueRedraw(): void {
+        if (this.redrawQueued || !this.lastArgs) return;
+        this.redrawQueued = true;
+        requestAnimationFrame(() => {
+            this.redrawQueued = false;
+            if (this.lastArgs) this.renderSheetProgress(...this.lastArgs);
+        });
+    }
+
+    // ------------------------------------------------------------------ VẼ TỜ GIẤY
+
     public renderSheet(sheet: Sheet): void {
         this.renderSheetProgress(sheet, null, 1.0);
     }
 
     /**
-     * Vẽ tờ giấy có hỗ trợ hiệu ứng in động từng dòng (Progressive Printing)
-     * @param sheet Dữ liệu tờ in
-     * @param activeSlot Index ô đang in (0..5 hoặc null nếu không in)
-     * @param progress Tiến độ in của ô đang in (0.0 -> 1.0)
-     * @param activeEntry Dữ liệu người dùng đang in vào ô đó
-     * @param gleam Tiến độ vệt sáng ánh kim quét qua viền vàng (0.0 -> 1.0)
+     * @param activeSlot ô đang in (null nếu không in)
+     * @param progress tiến độ in ô đó (0 -> 1), nội dung hiện dần từ trên xuống
+     * @param gleam vệt sáng quét qua khung vàng (0 -> 1)
      */
     public renderSheetProgress(
         sheet: Sheet,
@@ -68,687 +157,714 @@ export class SheetCanvasRenderer {
         activeEntry?: SheetEntry,
         gleam = 0.0
     ): void {
-        const { width, height } = this.canvas;
-        const ctx = this.ctx;
+        this.lastArgs = [sheet, activeSlot, progress, activeEntry, gleam];
 
-        // 1. Nền giấy in ngà ấm cúng
-        ctx.fillStyle = '#faf9f5';
-        ctx.fillRect(0, 0, width, height);
+        this.drawPaperBase(0, 0, this.W, this.H);
 
-        // Hiệu ứng vân giấy nhẹ
-        ctx.fillStyle = 'rgba(235, 230, 220, 0.35)';
-        for (let i = 0; i < 40; i++) {
-            const y = Math.random() * height;
-            ctx.fillRect(0, y, width, 1.5);
-        }
-
-        // 2. Viền mép giấy
-        ctx.strokeStyle = '#e2ded5';
-        ctx.lineWidth = 4;
-        ctx.strokeRect(12, 12, width - 24, height - 24);
-
-        // 3. Header tờ giấy
-        this.renderHeader(sheet);
-
-        // 4. Nội dung: Trang đặc biệt hoặc 6 ô chuẩn
         if (sheet.kind === 'special') {
-            this.renderSpecialFullPageProgress(sheet, activeSlot !== null, progress, activeEntry ?? sheet.entries[0], gleam);
+            const entry = activeEntry ?? sheet.entries[0];
+            if (entry) {
+                const { x, y, w, h } = this.specialRect();
+                this.withPrintClip(x, y, w, h, activeSlot !== null ? progress : 1, 'legend', () =>
+                    this.renderEntry(x, y, w, h, entry, 'legend', gleam)
+                );
+            }
         } else {
-            this.renderStandardGridProgress(sheet, activeSlot, progress, activeEntry, gleam);
+            this.renderStandardGrid(sheet, activeSlot, progress, activeEntry, gleam);
         }
 
-        // 5. Đường cắt răng cưa ở chân giấy
+        // Header vẽ SAU nội dung: hào quang/vùng xoá khi in dần không bao giờ đè lên dải tiêu đề
+        this.renderHeader(sheet);
         this.renderFooterPerforation();
-
         this.texture.needsUpdate = true;
     }
 
+    /** Vẽ lại một vùng nền giấy (toạ độ logic) */
+    private drawPaperBase(x: number, y: number, w: number, h: number): void {
+        const s = this.scale;
+        const sx = Math.max(0, x);
+        const sy = Math.max(0, y);
+        const sw = Math.min(this.W - sx, w - (sx - x));
+        const sh = Math.min(this.H - sy, h - (sy - y));
+        if (sw <= 0 || sh <= 0) return;
+        this.ctx.drawImage(this.paperBase, sx * s, sy * s, sw * s, sh * s, sx, sy, sw, sh);
+    }
+
+    private createPaperBase(width: number, height: number): HTMLCanvasElement {
+        const c = document.createElement('canvas');
+        c.width = Math.round(width * this.scale);
+        c.height = Math.round(height * this.scale);
+        const ctx = c.getContext('2d')!;
+        ctx.scale(this.scale, this.scale);
+
+        ctx.fillStyle = '#fbfaf6';
+        ctx.fillRect(0, 0, width, height);
+
+        // Vân giấy cố định (seeded)
+        let seed = 1337;
+        const rnd = () => {
+            seed = (seed * 16807) % 2147483647;
+            return seed / 2147483647;
+        };
+        for (let i = 0; i < 2200; i++) {
+            ctx.fillStyle = `rgba(${200 + rnd() * 30}, ${190 + rnd() * 30}, ${170 + rnd() * 30}, ${0.05 + rnd() * 0.08})`;
+            ctx.fillRect(rnd() * width, rnd() * height, 1 + rnd() * 2, 1 + rnd() * 2);
+        }
+        // Tối nhẹ ở mép giấy
+        const vignette = ctx.createRadialGradient(width / 2, height / 2, height * 0.35, width / 2, height / 2, height * 0.75);
+        vignette.addColorStop(0, 'rgba(0,0,0,0)');
+        vignette.addColorStop(1, 'rgba(120, 100, 70, 0.08)');
+        ctx.fillStyle = vignette;
+        ctx.fillRect(0, 0, width, height);
+
+        ctx.strokeStyle = '#e7e2d6';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(12, 12, width - 24, height - 24);
+        return c;
+    }
+
     private renderHeader(sheet: Sheet): void {
-        const { width } = this.canvas;
+        const width = this.W;
         const ctx = this.ctx;
 
-        // Dải tiêu đề
         ctx.fillStyle = '#1e293b';
-        ctx.fillRect(30, 30, width - 60, 90);
+        this.roundRect(30, 30, width - 60, 90, 14);
+        ctx.fill();
 
-        // Chữ thương hiệu
+        ctx.textBaseline = 'alphabetic';
         ctx.font = 'bold 32px "Segoe UI", system-ui, sans-serif';
         ctx.fillStyle = '#f8fafc';
         ctx.textAlign = 'left';
         ctx.fillText('⚡ TIKTOK LIVE PFP PRINTER', 50, 78);
 
-        // Số thứ tự tờ giấy
         ctx.font = 'bold 22px monospace';
         ctx.fillStyle = '#38bdf8';
         ctx.textAlign = 'right';
         const sheetLabel = sheet.kind === 'special' ? '★ GOLD VIP SHEET ★' : `SHEET #${String(sheet.id).padStart(4, '0')}`;
         ctx.fillText(sheetLabel, width - 50, 78);
 
-        // Dòng phụ
         ctx.font = '600 14px "Segoe UI", system-ui, sans-serif';
         ctx.fillStyle = '#64748b';
         ctx.textAlign = 'left';
         ctx.fillText('LIVE COMMUNITY PHOTO WALL • PRINTED ON DEMAND', 50, 104);
     }
 
-    private renderStandardGridProgress(
+    // Bố cục lưới (giữ nguyên toạ độ vì cây bút 3D bám theo các hằng số này trong PrinterWorkshopScene)
+    private gridLayout() {
+        const width = this.W;
+        const height = this.H;
+        const startX = 46;
+        const startY = 160;
+        const totalW = width - startX * 2;
+        const totalH = height - startY - 76;
+        const gapX = 36;
+        const gapY = 40;
+        return {
+            startX,
+            startY,
+            gapX,
+            gapY,
+            normalW: (totalW - gapX) / 2,
+            rowH: (totalH - gapY) / 2,
+            wideW: totalW,
+        };
+    }
+
+    private specialRect() {
+        const width = this.W;
+        const height = this.H;
+        const y = 160;
+        return { x: 50, y, w: width - 100, h: height - y - 80 };
+    }
+
+    private renderStandardGrid(
         sheet: Sheet,
         activeSlot: number | null,
         progress: number,
-        activeEntry?: SheetEntry,
-        gleam = 0.0
+        activeEntry: SheetEntry | undefined,
+        gleam: number
     ): void {
-        const { width, height } = this.canvas;
+        const L = this.gridLayout();
 
-        // Bố cục mới: Khổ giấy 4 avatar (2 hàng x 2 cột)
-        // Nếu là "quà to" (isWide hoặc frame === 'gold'): chiếm nguyên một hàng và in avatar to hơn!
-        const startX = 46;
-        const startY = 160;
-        const totalW = width - startX * 2; // 932 px
-        const totalH = height - startY - 76; // 1300 px
-
-        const gapX = 36;
-        const gapY = 40;
-        const normalW = (totalW - gapX) / 2; // 448 px
-        const rowH = (totalH - gapY) / 2; // 630 px
-        const wideW = totalW; // 932 px
-
-        // Duyệt 2 hàng (Hàng 0: slot 0, 1; Hàng 1: slot 2, 3)
         for (let row = 0; row < 2; row++) {
-            const y = startY + row * (rowH + gapY);
+            const y = L.startY + row * (L.rowH + L.gapY);
             const slotStart = row * 2;
+            const inRow = (slot: number | null) => slot === slotStart || slot === slotStart + 1;
 
-            const rowEntries = sheet.entries.filter((e) => e.slot === slotStart || e.slot === slotStart + 1);
-            const isRowWideActive =
-                (activeSlot === slotStart || activeSlot === slotStart + 1) &&
-                Boolean(activeEntry?.isWide || activeEntry?.frame === 'gold');
-            const rowWideEntry = isRowWideActive ? activeEntry : rowEntries.find((e) => e.isWide);
+            const rowEntries = sheet.entries.filter((e) => inRow(e.slot));
+            const activeHere = inRow(activeSlot) && activeEntry ? activeEntry : undefined;
+            const activeIsWide = Boolean(activeHere && (activeHere.isWide || activeHere.frame !== 'normal'));
+            const wideEntry = activeIsWide ? activeHere : rowEntries.find((e) => e.isWide);
 
-            if (rowWideEntry || isRowWideActive) {
-                // HÀNG CHIẾM NGUYÊN BẰNG QUÀ TO
-                const slotIdx = slotStart;
-                if ((activeSlot === slotStart || activeSlot === slotStart + 1) && activeEntry) {
-                    this.renderActivePrintingWideSlot(startX, y, wideW, rowH, slotIdx, activeEntry, progress, gleam);
-                } else if (rowWideEntry) {
-                    this.renderStaticWideSlot(startX, y, wideW, rowH, slotIdx, rowWideEntry, gleam);
+            if (wideEntry) {
+                // Quà to: chiếm nguyên cả hàng
+                const p = activeIsWide ? progress : 1;
+                this.withPrintClip(L.startX, y, L.wideW, L.rowH, p, wideEntry.frame === 'vip' ? 'legend' : 'gold', () =>
+                    this.renderEntry(L.startX, y, L.wideW, L.rowH, wideEntry, wideEntry.frame === 'vip' ? 'legend' : 'gold', gleam)
+                );
+                continue;
+            }
+
+            for (let col = 0; col < 2; col++) {
+                const slotIdx = slotStart + col;
+                const x = L.startX + col * (L.normalW + L.gapX);
+                const entry = slotIdx === activeSlot && activeEntry ? activeEntry : rowEntries.find((e) => e.slot === slotIdx);
+                const p = slotIdx === activeSlot ? progress : 1;
+
+                if (!entry) {
+                    this.renderEmptySlot(x, y, L.normalW, L.rowH);
+                    continue;
                 }
-            } else {
-                // HÀNG BÌNH THƯỜNG: 2 AVATAR (CỘT 0 VÀ CỘT 1)
-                for (let col = 0; col < 2; col++) {
-                    const slotIdx = slotStart + col;
-                    const x = startX + col * (normalW + gapX);
-
-                    if (slotIdx === activeSlot && activeEntry) {
-                        this.renderActivePrintingSlot(x, y, normalW, rowH, slotIdx, activeEntry, progress, gleam);
-                    } else {
-                        const entry = rowEntries.find((e) => e.slot === slotIdx);
-                        this.renderStaticSlot(x, y, normalW, rowH, slotIdx, entry, gleam);
-                    }
-                }
+                const tier: Tier = entry.frame === 'vip' ? 'legend' : entry.frame === 'gold' ? 'gold' : 'normal';
+                this.withPrintClip(x, y, L.normalW, L.rowH, p, tier, () =>
+                    this.renderEntry(x, y, L.normalW, L.rowH, entry, tier, gleam)
+                );
             }
         }
     }
 
-    /**
-     * Vẽ ô quà to đang in tiến trình chiếm nguyên cả hàng
-     */
-    private renderActivePrintingWideSlot(
-        x: number,
-        y: number,
-        w: number,
-        h: number,
-        slotIdx: number,
-        entry: SheetEntry,
-        progress: number,
-        gleam: number
-    ): void {
+    /** Ô trống: chỉ một vòng tròn nét đứt mờ báo chỗ sẽ in */
+    private renderEmptySlot(x: number, y: number, w: number, h: number): void {
         const ctx = this.ctx;
-        const radius = 20;
-
-        // 1. Nền ô trống trước khi vẽ
-        ctx.fillStyle = '#fffdf7';
-        this.roundRect(ctx, x, y, w, h, radius);
-        ctx.fill();
-
+        const { cx, cy, r } = this.avatarGeometry(x, y, w, h, 'normal');
         ctx.save();
         ctx.setLineDash([10, 10]);
-        ctx.strokeStyle = '#fde68a';
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.45)';
         ctx.lineWidth = 3;
-        this.roundRect(ctx, x, y, w, h, radius);
-        ctx.stroke();
-        ctx.restore();
-
-        // 2. Cắt clip phần nội dung đã in từ trên xuống
-        const currentPrintH = Math.max(1, h * Math.min(progress, 1.0));
-
-        ctx.save();
         ctx.beginPath();
-        ctx.rect(x - 8, y - 8, w + 16, currentPrintH + 8);
-        ctx.clip();
-
-        this.renderWideCardContent(x, y, w, h, slotIdx, entry, gleam);
-
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
         ctx.restore();
-
-        // 3. Tia quét Laser / nét bút scanline ngang qua cả hàng
-        if (progress > 0 && progress < 1.0) {
-            const scanY = y + currentPrintH;
-            const beamGrad = ctx.createLinearGradient(x, scanY, x + w, scanY);
-            beamGrad.addColorStop(0, 'rgba(251, 191, 36, 0.2)');
-            beamGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.98)');
-            beamGrad.addColorStop(1, 'rgba(251, 191, 36, 0.2)');
-
-            ctx.save();
-            ctx.strokeStyle = beamGrad;
-            ctx.lineWidth = 5;
-            ctx.shadowColor = '#fbbf24';
-            ctx.shadowBlur = 16;
-            ctx.beginPath();
-            ctx.moveTo(x - 4, scanY);
-            ctx.lineTo(x + w + 4, scanY);
-            ctx.stroke();
-
-            // Chấm dither lấp lánh vàng
-            ctx.fillStyle = '#f59e0b';
-            for (let dot = 0; dot < 24; dot++) {
-                const dx = x + Math.random() * w;
-                const dy = scanY + (Math.random() * 8 - 4);
-                ctx.fillRect(dx, dy, 3, 3);
-            }
-            ctx.restore();
-        }
     }
 
     /**
-     * Vẽ ô quà to tĩnh chiếm nguyên một hàng
+     * Phần đã in hiện dần từ trên xuống + vệt mực phát sáng ở mép đang vẽ.
      */
-    private renderStaticWideSlot(
-        x: number,
-        y: number,
-        w: number,
-        h: number,
-        slotIdx: number,
-        entry: SheetEntry,
-        gleam = 0.0
-    ): void {
-        this.renderWideCardContent(x, y, w, h, slotIdx, entry, gleam);
-    }
-
-    /**
-     * Nội dung thẻ quà to VIP chiếm nguyên một hàng (avatar to hơn nhiều, typography lộng lẫy)
-     */
-    private renderWideCardContent(
-        x: number,
-        y: number,
-        w: number,
-        h: number,
-        slotIdx: number,
-        entry: SheetEntry,
-        gleam: number
-    ): void {
+    private withPrintClip(x: number, y: number, w: number, h: number, progress: number, tier: Tier, draw: () => void): void {
         const ctx = this.ctx;
-        const radius = 20;
-
-        // Nền thẻ quà to VIP
-        const bgGrad = ctx.createLinearGradient(x, y, x + w, y + h);
-        bgGrad.addColorStop(0, '#ffffff');
-        bgGrad.addColorStop(0.5, '#fffdf5');
-        bgGrad.addColorStop(1, '#fef9c3');
-        ctx.fillStyle = bgGrad;
-        this.roundRect(ctx, x, y, w, h, radius);
-        ctx.fill();
-
-        // Đổ bóng hoàng kim
-        ctx.save();
-        ctx.shadowColor = 'rgba(245, 158, 11, 0.35)';
-        ctx.shadowBlur = 20;
-        ctx.shadowOffsetY = 6;
-        this.roundRect(ctx, x, y, w, h, radius);
-        ctx.stroke();
-        ctx.restore();
-
-        // Khung viền vàng kép lộng lẫy
-        const goldGrad = ctx.createLinearGradient(x, y, x + w, y + h);
-        goldGrad.addColorStop(0, '#f59e0b');
-        goldGrad.addColorStop(0.25, '#fef08a');
-        goldGrad.addColorStop(0.7, '#d97706');
-        goldGrad.addColorStop(1, '#b45309');
-
-        ctx.lineWidth = 7;
-        ctx.strokeStyle = goldGrad;
-        this.roundRect(ctx, x, y, w, h, radius);
-        ctx.stroke();
-
-        // Viền chỉ vàng mảnh bên trong
-        ctx.save();
-        ctx.lineWidth = 1.5;
-        ctx.strokeStyle = 'rgba(217, 119, 6, 0.5)';
-        this.roundRect(ctx, x + 8, y + 8, w - 16, h - 16, radius - 4);
-        ctx.stroke();
-        ctx.restore();
-
-        // Hiệu ứng ánh kim quét qua (Gleam sweep)
-        if (gleam > 0) {
-            const gleamX = x - w + gleam * (w * 2);
-            const sweepGrad = ctx.createLinearGradient(gleamX, y, gleamX + 100, y + h);
-            sweepGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
-            sweepGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.9)');
-            sweepGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-
-            ctx.save();
-            ctx.lineWidth = 10;
-            ctx.strokeStyle = sweepGrad;
-            this.roundRect(ctx, x, y, w, h, radius);
-            ctx.stroke();
-            ctx.restore();
-        }
-
-        // 1. Avatar to hơn hẳn (đường kính ~340px) đặt ở bên trái
-        const avatarSize = Math.min(340, h - 70);
-        const avatarX = x + 48;
-        const avatarY = y + (h - avatarSize) / 2;
-
-        this.drawAvatar(avatarX, avatarY, avatarSize, entry.avatarUrl, entry.username, true);
-
-        // 2. Khu vực thông tin VIP ở bên phải
-        const textStartX = avatarX + avatarSize + 48;
-        const textCenterY = y + h / 2;
-
-        // Huy hiệu VIP lớn
-        this.renderBadge(textStartX + 95, textCenterY - 110, '👑 VIP GOLD • BIG GIFT', '#d97706', '#fef3c7');
-
-        // Tên Username to, nổi bật
-        ctx.font = 'bold 36px "Segoe UI", system-ui, sans-serif';
-        ctx.fillStyle = '#0f172a';
-        ctx.textAlign = 'left';
-        const displayUser = entry.username.length > 20 ? entry.username.slice(0, 19) + '…' : entry.username;
-        ctx.fillText(displayUser, textStartX, textCenterY - 30);
-
-        // Dòng phụ cảm ơn & vinh danh
-        ctx.font = '600 20px "Segoe UI", system-ui, sans-serif';
-        ctx.fillStyle = '#b45309';
-        ctx.fillText('✨ QUÀ TO ĐẶC BIỆT CHIẾM TRỌN HÀNG ✨', textStartX, textCenterY + 25);
-
-        // Thông tin slot hàng
-        ctx.font = '600 16px monospace';
-        ctx.fillStyle = '#94a3b8';
-        const rowNum = slotIdx < 2 ? 1 : 2;
-        ctx.fillText(`★ HÀNG ${rowNum} • TOÀN KHỔ VIP BANNER`, textStartX, textCenterY + 75);
-    }
-
-    /**
-     * Vẽ ô đang in với hiệu ứng cắt dòng (clip) và tia laser scanline rực sáng
-     */
-    private renderActivePrintingSlot(
-        x: number,
-        y: number,
-        w: number,
-        h: number,
-        slotIdx: number,
-        entry: SheetEntry,
-        progress: number,
-        gleam: number
-    ): void {
-        const ctx = this.ctx;
-        const isGold = entry.frame === 'gold';
-        const radius = 16;
-
-        // 1. Vẽ nền ô trống phía dưới trước
-        ctx.fillStyle = '#f1f1ee';
-        this.roundRect(ctx, x, y, w, h, radius);
-        ctx.fill();
-
-        ctx.save();
-        ctx.setLineDash([8, 8]);
-        ctx.strokeStyle = '#d4d4cb';
-        ctx.lineWidth = 3;
-        this.roundRect(ctx, x, y, w, h, radius);
-        ctx.stroke();
-        ctx.restore();
-
-        // 2. Cắt clip phần nội dung đã in từ trên xuống
-        const currentPrintH = Math.max(1, h * Math.min(progress, 1.0));
-
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(x - 8, y - 8, w + 16, currentPrintH + 8);
-        ctx.clip();
-
-        // Vẽ nội dung thẻ avatar
-        this.renderCardContent(x, y, w, h, slotIdx, entry, isGold, gleam);
-
-        ctx.restore();
-
-        // 3. Tia quét Laser Scanline & Hạt chấm dither tại đường cắt
-        if (progress > 0 && progress < 1.0) {
-            const scanY = y + currentPrintH;
-
-            // Vệt sáng phát quang ngang qua thẻ
-            const beamGrad = ctx.createLinearGradient(x, scanY, x + w, scanY);
-            if (isGold) {
-                beamGrad.addColorStop(0, 'rgba(251, 191, 36, 0.2)');
-                beamGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.95)');
-                beamGrad.addColorStop(1, 'rgba(251, 191, 36, 0.2)');
-            } else {
-                beamGrad.addColorStop(0, 'rgba(56, 189, 248, 0.2)');
-                beamGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.95)');
-                beamGrad.addColorStop(1, 'rgba(56, 189, 248, 0.2)');
-            }
-
-            ctx.save();
-            ctx.strokeStyle = beamGrad;
-            ctx.lineWidth = 4;
-            ctx.shadowColor = isGold ? '#fbbf24' : '#38bdf8';
-            ctx.shadowBlur = 12;
-            ctx.beginPath();
-            ctx.moveTo(x - 4, scanY);
-            ctx.lineTo(x + w + 4, scanY);
-            ctx.stroke();
-
-            // Các chấm dither nhiệt mô phỏng in kim ảo
-            ctx.fillStyle = isGold ? '#f59e0b' : '#38bdf8';
-            for (let dot = 0; dot < 14; dot++) {
-                const dx = x + Math.random() * w;
-                const dy = scanY + (Math.random() * 6 - 3);
-                ctx.fillRect(dx, dy, 2, 2);
-            }
-            ctx.restore();
-        }
-    }
-
-    private renderStaticSlot(
-        x: number,
-        y: number,
-        w: number,
-        h: number,
-        slotIdx: number,
-        entry?: SheetEntry,
-        gleam = 0.0
-    ): void {
-        const ctx = this.ctx;
-        const radius = 16;
-
-        if (!entry) {
-            // Ô TRỐNG
-            ctx.fillStyle = '#f1f1ee';
-            this.roundRect(ctx, x, y, w, h, radius);
-            ctx.fill();
-
-            ctx.save();
-            ctx.setLineDash([8, 8]);
-            ctx.strokeStyle = '#d4d4cb';
-            ctx.lineWidth = 3;
-            this.roundRect(ctx, x, y, w, h, radius);
-            ctx.stroke();
-            ctx.restore();
-
-            ctx.fillStyle = '#9ca3af';
-            ctx.font = 'bold 24px "Segoe UI", system-ui, sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText(`SLOT ${slotIdx + 1}`, x + w / 2, y + h / 2 - 10);
-            ctx.font = '500 16px "Segoe UI", system-ui, sans-serif';
-            ctx.fillText('⏳ Chờ in...', x + w / 2, y + h / 2 + 20);
+        if (progress >= 1) {
+            draw();
             return;
         }
+        const printedH = Math.max(1, h * Math.max(0, progress));
 
-        // Ô ĐÃ CÓ AVATAR
-        const isGold = entry.frame === 'gold';
-        this.renderCardContent(x, y, w, h, slotIdx, entry, isGold, gleam);
+        // Ô đang chờ phần chưa in: vòng nét đứt
+        this.renderEmptySlot(x, y, w, h);
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(x - 60, y - 60, w + 120, printedH + 60);
+        ctx.clip();
+        // Xoá vòng nét đứt ở phần đã in rồi vẽ nội dung
+        this.drawPaperBase(x - 60, y - 60, w + 120, printedH + 60);
+        draw();
+        ctx.restore();
+
+        if (progress > 0) {
+            const scanY = y + printedH;
+            const glow = tier === 'normal' ? '56, 189, 248' : '251, 191, 36';
+            const beam = ctx.createLinearGradient(x, scanY, x + w, scanY);
+            beam.addColorStop(0, `rgba(${glow}, 0)`);
+            beam.addColorStop(0.5, 'rgba(255, 255, 255, 0.95)');
+            beam.addColorStop(1, `rgba(${glow}, 0)`);
+            ctx.save();
+            ctx.strokeStyle = beam;
+            ctx.lineWidth = 4;
+            ctx.shadowColor = `rgb(${glow})`;
+            ctx.shadowBlur = 14;
+            ctx.beginPath();
+            ctx.moveTo(x, scanY);
+            ctx.lineTo(x + w, scanY);
+            ctx.stroke();
+            ctx.restore();
+        }
     }
 
-    private renderCardContent(
-        x: number,
-        y: number,
-        w: number,
-        h: number,
-        slotIdx: number,
-        entry: SheetEntry,
-        isGold: boolean,
-        gleam: number
-    ): void {
+    private avatarGeometry(x: number, y: number, w: number, h: number, tier: Tier) {
+        // Chừa chỗ cho khung vàng (vương miện phía trên) và tên phía dưới
+        // VIP trong 1 hàng: avatar cùng cỡ khung vàng; chỉ trang đặc biệt (cũ) mới phóng to cả trang
+        const fullPage = tier === 'legend' && h > 900;
+        const nameSpace = fullPage ? 190 : tier === 'normal' ? 110 : 120;
+        const frameSpace = tier === 'legend' ? 0.4 : tier === 'gold' ? 0.3 : 0.08;
+        const maxR = Math.min(w / 2 - 20, (h - nameSpace) / 2) / (1 + frameSpace);
+        const r = fullPage ? maxR : Math.min(maxR, tier === 'normal' ? 165 : 185);
+        const crownLift = tier === 'normal' ? 0 : r * 0.12;
+        const cx = x + w / 2;
+        const cy = y + (h - nameSpace) / 2 + crownLift;
+        return { cx, cy, r };
+    }
+
+    private renderEntry(x: number, y: number, w: number, h: number, entry: SheetEntry, tier: Tier, gleam: number): void {
+        const { cx, cy, r } = this.avatarGeometry(x, y, w, h, tier);
+
+        if (tier === 'normal') {
+            this.drawAvatarCircle(cx, cy, r, entry, 'normal');
+        } else {
+            this.drawGoldFrame(cx, cy, r, tier, gleam, () => this.drawAvatarCircle(cx, cy, r, entry, tier));
+        }
+
+        const fullPage = tier === 'legend' && h > 900;
+        const ringOuter = tier === 'normal' ? r + 8 : r * (tier === 'legend' ? 1.3 : 1.26);
+        const nameY = cy + ringOuter + (fullPage ? 95 : 62);
+        const maxFont = fullPage ? 84 : tier === 'normal' ? 46 : 64;
+        this.drawName(entry.username, cx, nameY, w - 40, maxFont, tier);
+    }
+
+    private drawAvatarCircle(cx: number, cy: number, r: number, entry: SheetEntry, tier: Tier): void {
         const ctx = this.ctx;
-        const radius = 16;
+        const img = this.getAvatarImage(entry);
 
-        // Nền thẻ card
-        ctx.fillStyle = isGold ? '#fffdf7' : '#ffffff';
-        this.roundRect(ctx, x, y, w, h, radius);
-        ctx.fill();
-
-        // Đổ bóng thẻ
+        // Bóng đổ mềm dưới avatar
         ctx.save();
-        ctx.shadowColor = isGold ? 'rgba(245, 158, 11, 0.45)' : 'rgba(0, 0, 0, 0.08)';
-        ctx.shadowBlur = isGold ? 16 : 10;
-        ctx.shadowOffsetY = 4;
-        this.roundRect(ctx, x, y, w, h, radius);
+        ctx.shadowColor = 'rgba(15, 23, 42, 0.28)';
+        ctx.shadowBlur = 24;
+        ctx.shadowOffsetY = 10;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(cx, cy, r + (tier === 'normal' ? 8 : 2), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.clip();
+        if (img) {
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(img, cx - r, cy - r, r * 2, r * 2);
+        } else {
+            // Đang tải ảnh: nền màu nhạt theo tên
+            const hue = this.hue(entry.username);
+            ctx.fillStyle = `hsl(${hue}, 70%, 88%)`;
+            ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+        }
+        // Ánh sáng bóng nhẹ phía trên như ảnh in bóng
+        const shine = ctx.createLinearGradient(cx, cy - r, cx, cy);
+        shine.addColorStop(0, 'rgba(255,255,255,0.18)');
+        shine.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = shine;
+        ctx.fillRect(cx - r, cy - r, r * 2, r);
+        ctx.restore();
+
+        if (tier === 'normal') {
+            const hue = this.hue(entry.username);
+            ctx.save();
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = `hsla(${hue}, 75%, 60%, 0.9)`;
+            ctx.beginPath();
+            ctx.arc(cx, cy, r + 8, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+
+    /** Khung vàng trang trí: vành kim loại, viền hạt châu, đá quý, lấp lánh, vương miện (và nguyệt quế cho legend). */
+    private drawGoldFrame(cx: number, cy: number, r: number, tier: Tier, gleam: number, drawInside: () => void): void {
+        const ctx = this.ctx;
+        const ringW = r * (tier === 'legend' ? 0.2 : 0.17);
+        const ringR = r + ringW / 2;
+        const outerR = r + ringW;
+
+        // Hào quang
+        ctx.save();
+        const halo = ctx.createRadialGradient(cx, cy, r, cx, cy, outerR * 1.45);
+        halo.addColorStop(0, 'rgba(253, 224, 71, 0.45)');
+        halo.addColorStop(1, 'rgba(253, 224, 71, 0)');
+        ctx.fillStyle = halo;
+        ctx.beginPath();
+        ctx.arc(cx, cy, outerR * 1.45, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        if (tier === 'legend') {
+            this.drawSunburst(cx, cy, outerR);
+            this.drawLaurel(cx, cy, outerR);
+        }
+
+        drawInside();
+
+        // Vành vàng kim loại (gradient xoay quanh tạo cảm giác kim loại đánh bóng)
+        const metal = ctx.createConicGradient(-Math.PI / 4, cx, cy);
+        const stops = ['#fff3b0', '#e8a317', '#a8650a', '#f7c948', '#fffbe0', '#c9850f', '#8a5208', '#f2b632', '#fff3b0'];
+        stops.forEach((c, i) => metal.addColorStop(i / (stops.length - 1), c));
+        ctx.save();
+        ctx.shadowColor = 'rgba(120, 72, 0, 0.45)';
+        ctx.shadowBlur = 10;
+        ctx.lineWidth = ringW;
+        ctx.strokeStyle = metal;
+        ctx.beginPath();
+        ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
 
-        // Khung viền (vàng hoặc thường)
-        if (isGold) {
-            const goldGrad = ctx.createLinearGradient(x, y, x + w, y + h);
-            goldGrad.addColorStop(0, '#f59e0b');
-            goldGrad.addColorStop(0.3, '#fef08a');
-            goldGrad.addColorStop(0.7, '#d97706');
-            goldGrad.addColorStop(1, '#b45309');
-
-            ctx.lineWidth = 6;
-            ctx.strokeStyle = goldGrad;
-            this.roundRect(ctx, x, y, w, h, radius);
+        // Chỉ viền nâu đậm trong/ngoài
+        ctx.save();
+        ctx.strokeStyle = '#6b3d05';
+        ctx.lineWidth = 2;
+        for (const rr of [r + 1, outerR]) {
+            ctx.beginPath();
+            ctx.arc(cx, cy, rr, 0, Math.PI * 2);
             ctx.stroke();
+        }
+        // Đường khắc chìm giữa vành
+        ctx.strokeStyle = 'rgba(255, 250, 220, 0.75)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
 
-            // Hiệu ứng ánh kim quét qua (Gleam Sweep)
-            if (gleam > 0) {
-                const gleamX = x - w + gleam * (w * 2);
-                const sweepGrad = ctx.createLinearGradient(gleamX, y, gleamX + 60, y + h);
-                sweepGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
-                sweepGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.85)');
-                sweepGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        // Hạt châu quanh mép ngoài
+        const beads = tier === 'legend' ? 48 : 36;
+        const beadR = ringW * 0.16;
+        for (let i = 0; i < beads; i++) {
+            const a = (i / beads) * Math.PI * 2;
+            const bx = cx + Math.cos(a) * (outerR + beadR * 1.2);
+            const by = cy + Math.sin(a) * (outerR + beadR * 1.2);
+            const g = ctx.createRadialGradient(bx - beadR * 0.4, by - beadR * 0.4, 0, bx, by, beadR);
+            g.addColorStop(0, '#fffbe6');
+            g.addColorStop(0.5, '#f5b82e');
+            g.addColorStop(1, '#8a5208');
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(bx, by, beadR, 0, Math.PI * 2);
+            ctx.fill();
+        }
 
+        // Đá quý gắn trên vành (trái, phải, dưới)
+        const gemColors = tier === 'legend' ? ['#e11d48', '#2563eb', '#059669', '#9333ea'] : ['#e11d48', '#2563eb', '#e11d48'];
+        const gemAngles = tier === 'legend' ? [Math.PI, 0, Math.PI / 2, Math.PI * 0.75] : [Math.PI, 0, Math.PI / 2];
+        gemAngles.forEach((a, i) => {
+            this.drawGem(cx + Math.cos(a) * ringR, cy + Math.sin(a) * ringR, ringW * 0.42, gemColors[i % gemColors.length]);
+        });
+
+        // Vệt sáng chạy quanh vành khi vừa in xong
+        if (gleam > 0 && gleam < 1) {
+            const a = -Math.PI / 2 + gleam * Math.PI * 2;
+            ctx.save();
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.strokeStyle = 'rgba(255, 255, 230, 0.85)';
+            ctx.lineWidth = ringW * 0.6;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.arc(cx, cy, ringR, a - 0.35, a);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // Ánh lấp lánh
+        const sparkles = tier === 'legend' ? 7 : 4;
+        for (let i = 0; i < sparkles; i++) {
+            const a = -Math.PI * 0.85 + (i / sparkles) * Math.PI * 1.9 + 0.3;
+            const d = outerR + ringW * (0.9 + (i % 2) * 0.5);
+            this.drawSparkle(cx + Math.cos(a) * d, cy + Math.sin(a) * d, ringW * (0.35 + (i % 3) * 0.12));
+        }
+
+        if (tier === 'legend') this.drawRoyalCrown(cx, cy - outerR + ringW * 0.1, r * 0.7);
+        else this.drawCrown(cx, cy - outerR + ringW * 0.15, r * 0.5);
+    }
+
+    private drawGem(x: number, y: number, size: number, color: string): void {
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.beginPath();
+        ctx.moveTo(0, -size);
+        ctx.lineTo(size * 0.8, 0);
+        ctx.lineTo(0, size);
+        ctx.lineTo(-size * 0.8, 0);
+        ctx.closePath();
+        const g = ctx.createLinearGradient(-size, -size, size, size);
+        g.addColorStop(0, '#ffffff');
+        g.addColorStop(0.35, color);
+        g.addColorStop(1, '#111827');
+        ctx.fillStyle = g;
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#7a4a06';
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    private drawSparkle(x: number, y: number, size: number): void {
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.fillStyle = '#fffbe8';
+        ctx.shadowColor = '#fbbf24';
+        ctx.shadowBlur = size;
+        ctx.beginPath();
+        for (let i = 0; i < 8; i++) {
+            const a = (i / 8) * Math.PI * 2;
+            const rr = i % 2 === 0 ? size : size * 0.22;
+            ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    }
+
+    private drawCrown(cx: number, baseY: number, width: number): void {
+        const ctx = this.ctx;
+        const h = width * 0.62;
+        const w = width;
+        ctx.save();
+        ctx.translate(cx, baseY);
+        ctx.shadowColor = 'rgba(120, 72, 0, 0.5)';
+        ctx.shadowBlur = 8;
+        ctx.shadowOffsetY = 3;
+
+        ctx.beginPath();
+        ctx.moveTo(-w / 2, 0);
+        ctx.lineTo(-w / 2 - w * 0.04, -h * 0.75);
+        ctx.lineTo(-w * 0.25, -h * 0.35);
+        ctx.lineTo(0, -h);
+        ctx.lineTo(w * 0.25, -h * 0.35);
+        ctx.lineTo(w / 2 + w * 0.04, -h * 0.75);
+        ctx.lineTo(w / 2, 0);
+        ctx.closePath();
+        const g = ctx.createLinearGradient(0, -h, 0, 0);
+        g.addColorStop(0, '#fff6c4');
+        g.addColorStop(0.45, '#f5b82e');
+        g.addColorStop(1, '#9a5b07');
+        ctx.fillStyle = g;
+        ctx.fill();
+        ctx.shadowColor = 'transparent';
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = '#6b3d05';
+        ctx.stroke();
+
+        // Đai vương miện
+        ctx.fillStyle = '#b8720b';
+        ctx.fillRect(-w / 2, -h * 0.16, w, h * 0.16);
+        ctx.strokeRect(-w / 2, -h * 0.16, w, h * 0.16);
+
+        // Ngọc trên các đỉnh
+        for (const [px, py] of [[-w / 2 - w * 0.04, -h * 0.75], [0, -h], [w / 2 + w * 0.04, -h * 0.75]]) {
+            const pearl = ctx.createRadialGradient(px - 2, py - 2, 0, px, py, w * 0.06);
+            pearl.addColorStop(0, '#ffffff');
+            pearl.addColorStop(1, '#e5d3a1');
+            ctx.fillStyle = pearl;
+            ctx.beginPath();
+            ctx.arc(px, py, w * 0.055, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        this.drawGem(0, -h * 0.42, w * 0.08, '#e11d48');
+        ctx.restore();
+    }
+
+    /** Tia hào quang vàng toả ra sau khung VIP */
+    private drawSunburst(cx: number, cy: number, radius: number): void {
+        const ctx = this.ctx;
+        const rays = 24;
+        const outer = radius * 1.55;
+        ctx.save();
+        for (let i = 0; i < rays; i++) {
+            const a = (i / rays) * Math.PI * 2;
+            const half = (Math.PI / rays) * 0.45;
+            const g = ctx.createRadialGradient(cx, cy, radius * 0.9, cx, cy, outer * (i % 2 ? 0.92 : 1));
+            g.addColorStop(0, 'rgba(253, 224, 71, 0.55)');
+            g.addColorStop(1, 'rgba(253, 224, 71, 0)');
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.arc(cx, cy, outer * (i % 2 ? 0.92 : 1), a - half, a + half);
+            ctx.closePath();
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+
+    /** Vương miện hoàng gia cho khung VIP: 5 đỉnh, lót nhung đỏ, đai nạm ngọc, quả cầu thập tự trên đỉnh */
+    private drawRoyalCrown(cx: number, baseY: number, width: number): void {
+        const ctx = this.ctx;
+        const w = width;
+        const h = w * 0.7;
+        ctx.save();
+        ctx.translate(cx, baseY);
+
+        // Lót nhung đỏ phía sau
+        ctx.beginPath();
+        ctx.ellipse(0, -h * 0.42, w * 0.42, h * 0.5, 0, Math.PI, 0);
+        const velvet = ctx.createRadialGradient(-w * 0.1, -h * 0.6, 2, 0, -h * 0.4, w * 0.5);
+        velvet.addColorStop(0, '#f43f5e');
+        velvet.addColorStop(1, '#7f1d1d');
+        ctx.fillStyle = velvet;
+        ctx.fill();
+
+        // Thân vương miện 5 đỉnh
+        const tips = [-0.5, -0.27, 0, 0.27, 0.5];
+        const tipH = [0.78, 0.95, 1.05, 0.95, 0.78];
+        ctx.beginPath();
+        ctx.moveTo(-w / 2, 0);
+        tips.forEach((t, i) => {
+            const tx = t * w;
+            ctx.lineTo(tx, -h * tipH[i]);
+            if (i < tips.length - 1) {
+                const mx = ((t + tips[i + 1]) / 2) * w;
+                ctx.quadraticCurveTo(mx, -h * 0.25, tips[i + 1] * w, -h * tipH[i + 1]);
+            }
+        });
+        ctx.lineTo(w / 2, 0);
+        ctx.closePath();
+        const gold = ctx.createLinearGradient(-w / 2, -h, w / 2, 0);
+        gold.addColorStop(0, '#fff7cc');
+        gold.addColorStop(0.3, '#f8c845');
+        gold.addColorStop(0.55, '#fff2b3');
+        gold.addColorStop(0.8, '#d6930f');
+        gold.addColorStop(1, '#8a5208');
+        ctx.shadowColor = 'rgba(120, 72, 0, 0.55)';
+        ctx.shadowBlur = 12;
+        ctx.shadowOffsetY = 4;
+        ctx.fillStyle = gold;
+        ctx.fill();
+        ctx.shadowColor = 'transparent';
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#6b3d05';
+        ctx.stroke();
+
+        // Đai vương miện nạm ngọc
+        const bandH = h * 0.2;
+        const band = ctx.createLinearGradient(0, -bandH, 0, 0);
+        band.addColorStop(0, '#fde68a');
+        band.addColorStop(1, '#b7791f');
+        ctx.fillStyle = band;
+        ctx.fillRect(-w / 2, -bandH, w, bandH);
+        ctx.strokeRect(-w / 2, -bandH, w, bandH);
+        const gems = ['#2563eb', '#e11d48', '#059669', '#e11d48', '#2563eb'];
+        gems.forEach((c, i) => this.drawGem((i - 2) * w * 0.2, -bandH / 2, bandH * 0.42, c));
+
+        // Ngọc trai trên các đỉnh + thập tự giữa
+        tips.forEach((t, i) => {
+            if (i === 2) return;
+            const px = t * w;
+            const py = -h * tipH[i];
+            const pearl = ctx.createRadialGradient(px - 3, py - 3, 0, px, py, w * 0.05);
+            pearl.addColorStop(0, '#ffffff');
+            pearl.addColorStop(1, '#e5d3a1');
+            ctx.fillStyle = pearl;
+            ctx.beginPath();
+            ctx.arc(px, py, w * 0.045, 0, Math.PI * 2);
+            ctx.fill();
+        });
+        const topY = -h * tipH[2];
+        ctx.fillStyle = gold;
+        ctx.beginPath();
+        ctx.arc(0, topY - w * 0.04, w * 0.05, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillRect(-w * 0.012, topY - w * 0.17, w * 0.024, w * 0.1);
+        ctx.fillRect(-w * 0.045, topY - w * 0.14, w * 0.09, w * 0.024);
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(-w * 0.012, topY - w * 0.17, w * 0.024, w * 0.1);
+        ctx.strokeRect(-w * 0.045, topY - w * 0.14, w * 0.09, w * 0.024);
+
+        // Ngọc lớn giữa thân
+        this.drawGem(0, -h * 0.5, w * 0.075, '#e11d48');
+        this.drawGem(-w * 0.27, -h * 0.45, w * 0.05, '#059669');
+        this.drawGem(w * 0.27, -h * 0.45, w * 0.05, '#059669');
+        ctx.restore();
+    }
+
+    private drawLaurel(cx: number, cy: number, radius: number): void {
+        const ctx = this.ctx;
+        const leafR = radius * 1.12;
+        for (const side of [-1, 1]) {
+            for (let i = 0; i < 9; i++) {
+                const a = Math.PI / 2 + side * (0.35 + i * 0.2);
+                const lx = cx + Math.cos(a) * leafR;
+                const ly = cy + Math.sin(a) * leafR;
                 ctx.save();
-                ctx.lineWidth = 8;
-                ctx.strokeStyle = sweepGrad;
-                this.roundRect(ctx, x, y, w, h, radius);
+                ctx.translate(lx, ly);
+                ctx.rotate(a + (side > 0 ? -Math.PI / 2 - 0.5 : Math.PI / 2 + 0.5));
+                const len = radius * 0.17;
+                const g = ctx.createLinearGradient(0, -len, 0, len);
+                g.addColorStop(0, '#fde68a');
+                g.addColorStop(1, '#b7791f');
+                ctx.fillStyle = g;
+                ctx.beginPath();
+                ctx.ellipse(0, 0, len * 0.38, len, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = 'rgba(107, 61, 5, 0.6)';
+                ctx.lineWidth = 1.2;
                 ctx.stroke();
                 ctx.restore();
             }
-
-            // Huy hiệu vương miện VIP
-            this.renderBadge(x + w - 42, y + 16, '👑 GOLD', '#d97706', '#fef3c7');
-        } else {
-            ctx.lineWidth = 3;
-            ctx.strokeStyle = '#cbd5e1';
-            this.roundRect(ctx, x, y, w, h, radius);
-            ctx.stroke();
         }
-
-        // Kích thước Avatar trong ô (khổ 4 avatar lớn và rõ nét)
-        const avatarSize = Math.min(w * 0.62, h * 0.5);
-        const avatarX = x + (w - avatarSize) / 2;
-        const avatarY = y + 36;
-
-        // Vẽ ảnh Avatar
-        this.drawAvatar(avatarX, avatarY, avatarSize, entry.avatarUrl, entry.username, isGold);
-
-        // Vẽ tên Username
-        ctx.font = 'bold 26px "Segoe UI", system-ui, sans-serif';
-        ctx.fillStyle = '#0f172a';
-        ctx.textAlign = 'center';
-        const displayUser = entry.username.length > 15 ? entry.username.slice(0, 14) + '…' : entry.username;
-        ctx.fillText(displayUser, x + w / 2, avatarY + avatarSize + 44);
-
-        // Nhãn số slot
-        ctx.font = '600 15px monospace';
-        ctx.fillStyle = isGold ? '#b45309' : '#94a3b8';
-        ctx.fillText(`PFP #${slotIdx + 1}`, x + w / 2, avatarY + avatarSize + 74);
     }
 
-    private drawAvatar(
-        x: number,
-        y: number,
-        size: number,
-        avatarUrl: string | null,
-        username: string,
-        isGold: boolean
-    ): void {
+    /** Tên người xem: chữ tròn đậm, màu đậm trên viền trắng dày -> đọc rõ từ xa trên livestream. */
+    private drawName(username: string, cx: number, baselineY: number, maxWidth: number, maxFont: number, tier: Tier): void {
         const ctx = this.ctx;
-        const cx = x + size / 2;
-        const cy = y + size / 2;
-        const r = size / 2;
+        const name = username.length > 22 ? `${username.slice(0, 21)}…` : username;
 
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.closePath();
-        ctx.clip();
+        let size = maxFont;
+        const font = (px: number) => `${NAME_WEIGHT} ${px}px ${NAME_FONT_STACK}`;
+        ctx.font = font(size);
+        while (ctx.measureText(name).width > maxWidth && size > 20) {
+            size -= 2;
+            ctx.font = font(size);
+        }
+        const textW = ctx.measureText(name).width;
+        // Baloo có phần dấu cao: hạ nhẹ chữ cho cân với avatar
+        const y = baselineY + size * 0.12;
 
-        const cachedImg = avatarUrl ? this.imageCache.get(avatarUrl) : null;
-        if (cachedImg) {
-            ctx.drawImage(cachedImg, x, y, size, size);
+        let fill: string | CanvasGradient;
+        let outline: string;
+        if (tier === 'normal') {
+            // Một màu đậm duy nhất theo tên (đủ tương phản với giấy trắng)
+            // Bảng màu đậm, tươi, dễ đọc trên giấy trắng (bỏ vàng/xanh rêu khó nhìn)
+            const palette = ['#e11d48', '#db2777', '#9333ea', '#4f46e5', '#2563eb', '#0284c7', '#0d9488', '#059669', '#ea580c', '#c2410c'];
+            fill = palette[Math.abs(Math.round(this.hue(username))) % palette.length];
+            outline = 'rgba(15, 23, 42, 0.55)';
         } else {
-            const hue = this.hashStringToHue(username);
-            const grad = ctx.createLinearGradient(x, y, x + size, y + size);
-            grad.addColorStop(0, `hsl(${hue}, 80%, 65%)`);
-            grad.addColorStop(1, `hsl(${(hue + 45) % 360}, 85%, 45%)`);
-            ctx.fillStyle = grad;
-            ctx.fillRect(x, y, size, size);
-
-            ctx.font = `bold ${Math.floor(size * 0.44)}px "Segoe UI", system-ui, sans-serif`;
-            ctx.fillStyle = '#ffffff';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            const initial = (username.charAt(0) || 'U').toUpperCase();
-            ctx.fillText(initial, cx, cy);
+            fill = ctx.createLinearGradient(0, y - size * 0.8, 0, y + size * 0.1);
+            fill.addColorStop(0, '#fde68a');
+            fill.addColorStop(0.45, '#f59e0b');
+            fill.addColorStop(1, '#b45309');
+            outline = '#4a2503';
         }
 
-        ctx.restore();
-
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.strokeStyle = isGold ? '#f59e0b' : '#e2e8f0';
-        ctx.lineWidth = isGold ? 4 : 2;
-        ctx.stroke();
-    }
-
-    private renderSpecialFullPageProgress(
-        _sheet: Sheet,
-        isPrinting: boolean,
-        progress: number,
-        entry: SheetEntry,
-        _gleam = 0.0
-    ): void {
-        const { width, height } = this.canvas;
-        const ctx = this.ctx;
-
-        const x = 50;
-        const y = 160;
-        const w = width - 100;
-        const h = height - y - 80;
-
-        // Nếu đang in thì cắt clip theo tiến trình
-        const currentPrintH = isPrinting ? Math.max(1, h * Math.min(progress, 1.0)) : h;
-
         ctx.save();
-        ctx.beginPath();
-        ctx.rect(x - 10, y - 10, w + 20, currentPrintH + 20);
-        ctx.clip();
-
-        // Nền đặc biệt hoàng gia
-        const bgGrad = ctx.createLinearGradient(x, y, x + w, y + h);
-        bgGrad.addColorStop(0, '#fffbeb');
-        bgGrad.addColorStop(0.5, '#fef3c7');
-        bgGrad.addColorStop(1, '#fde68a');
-        ctx.fillStyle = bgGrad;
-        this.roundRect(ctx, x, y, w, h, 24);
-        ctx.fill();
-
-        // Viền vàng lấp lánh kép
-        const goldGrad = ctx.createLinearGradient(x, y, x + w, y + h);
-        goldGrad.addColorStop(0, '#d97706');
-        goldGrad.addColorStop(0.25, '#fbbf24');
-        goldGrad.addColorStop(0.5, '#fef08a');
-        goldGrad.addColorStop(0.75, '#f59e0b');
-        goldGrad.addColorStop(1, '#92400e');
-
-        ctx.lineWidth = 10;
-        ctx.strokeStyle = goldGrad;
-        this.roundRect(ctx, x, y, w, h, 24);
-        ctx.stroke();
-
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = '#92400e';
-        this.roundRect(ctx, x + 8, y + 8, w - 16, h - 16, 18);
-        ctx.stroke();
-
-        // Tiêu đề giải thưởng
-        ctx.font = 'bold 38px "Segoe UI", system-ui, sans-serif';
-        ctx.fillStyle = '#b45309';
         ctx.textAlign = 'center';
-        ctx.fillText('👑 LEGENDARY SUPERSTAR 👑', x + w / 2, y + 70);
+        ctx.textBaseline = 'alphabetic';
+        ctx.lineJoin = 'round';
+        ctx.miterLimit = 2;
 
-        ctx.font = '600 20px "Segoe UI", system-ui, sans-serif';
-        ctx.fillStyle = '#78350f';
-        ctx.fillText('FULL PAGE EXCLUSIVE PRINT • 1000+ DIAMONDS', x + w / 2, y + 105);
+        // 1. Viền trắng dày + bóng mềm tách chữ khỏi nền
+        ctx.shadowColor = 'rgba(15, 23, 42, 0.28)';
+        ctx.shadowBlur = 8;
+        ctx.shadowOffsetY = 4;
+        ctx.lineWidth = size * 0.26;
+        ctx.strokeStyle = '#ffffff';
+        ctx.strokeText(name, cx, y);
+        ctx.shadowColor = 'transparent';
 
-        // Avatar khổng lồ ở giữa
-        const avatarSize = 380;
-        const avatarX = x + (w - avatarSize) / 2;
-        const avatarY = y + 150;
-        const username = entry?.username ?? 'Superstar';
-        this.drawAvatar(avatarX, avatarY, avatarSize, entry?.avatarUrl ?? null, username, true);
+        // 2. Viền tối mảnh làm nét chữ sắc
+        ctx.lineWidth = Math.max(1.5, size * (tier === 'normal' ? 0.04 : 0.055));
+        ctx.strokeStyle = outline;
+        ctx.strokeText(name, cx, y);
 
-        // Tên người dùng cực lớn
-        ctx.font = 'bold 44px "Segoe UI", system-ui, sans-serif';
-        ctx.fillStyle = '#451a03';
-        ctx.textAlign = 'center';
-        ctx.fillText(`@${username}`, x + w / 2, avatarY + avatarSize + 70);
+        // 3. Lõi chữ
+        ctx.fillStyle = fill;
+        ctx.fillText(name, cx, y);
 
-        // Dải ruy băng cảm ơn
-        ctx.font = 'bold 24px monospace';
-        ctx.fillStyle = '#92400e';
-        ctx.fillText('✦ THANK YOU FOR YOUR INCREDIBLE SUPPORT ✦', x + w / 2, avatarY + avatarSize + 120);
-
-        ctx.restore();
-
-        // Tia laser scanline khi đang in
-        if (isPrinting && progress < 1.0) {
-            const scanY = y + currentPrintH;
+        if (tier !== 'normal') {
+            // Ánh kim nhẹ ở nửa trên chữ vàng
             ctx.save();
-            ctx.strokeStyle = '#fbbf24';
-            ctx.lineWidth = 6;
-            ctx.shadowColor = '#f59e0b';
-            ctx.shadowBlur = 20;
             ctx.beginPath();
-            ctx.moveTo(x - 10, scanY);
-            ctx.lineTo(x + w + 10, scanY);
-            ctx.stroke();
+            ctx.rect(cx - textW, y - size, textW * 2, size * 0.5);
+            ctx.clip();
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.28)';
+            ctx.fillText(name, cx, y);
             ctx.restore();
         }
-    }
-
-    private renderBadge(x: number, y: number, text: string, stroke: string, fill: string): void {
-        const ctx = this.ctx;
-        ctx.save();
-        ctx.font = 'bold 12px "Segoe UI", system-ui, sans-serif';
-        const textMetrics = ctx.measureText(text);
-        const bw = textMetrics.width + 16;
-        const bh = 24;
-
-        ctx.fillStyle = fill;
-        ctx.strokeStyle = stroke;
-        ctx.lineWidth = 1.5;
-        this.roundRect(ctx, x - bw, y, bw, bh, 6);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.fillStyle = stroke;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(text, x - bw / 2, y + bh / 2);
         ctx.restore();
     }
 
     private renderFooterPerforation(): void {
-        const { width, height } = this.canvas;
+        const width = this.W;
+        const height = this.H;
         const ctx = this.ctx;
         const y = height - 25;
 
@@ -764,18 +880,13 @@ export class SheetCanvasRenderer {
         ctx.font = '16px monospace';
         ctx.fillStyle = '#64748b';
         ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
         ctx.fillText('✂ TEAR HERE', 40, y - 6);
         ctx.restore();
     }
 
-    private roundRect(
-        ctx: CanvasRenderingContext2D,
-        x: number,
-        y: number,
-        w: number,
-        h: number,
-        r: number
-    ): void {
+    private roundRect(x: number, y: number, w: number, h: number, r: number): void {
+        const ctx = this.ctx;
         ctx.beginPath();
         ctx.moveTo(x + r, y);
         ctx.lineTo(x + w - r, y);
@@ -789,7 +900,7 @@ export class SheetCanvasRenderer {
         ctx.closePath();
     }
 
-    private hashStringToHue(str: string): number {
+    private hue(str: string): number {
         let hash = 0;
         for (let i = 0; i < str.length; i++) {
             hash = str.charCodeAt(i) + ((hash << 5) - hash);

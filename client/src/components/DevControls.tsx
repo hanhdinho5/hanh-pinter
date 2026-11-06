@@ -3,7 +3,21 @@ import type { Sheet, PrinterStatus, SheetEntry, QueueState, TikTokStatus } from 
 import type { PrinterCanvasHandle } from '../printer3d/PrinterCanvas';
 import { api } from '../socket/socketClient';
 import { soundManager } from '../audio/SoundManager';
-import { BACKGROUND_PRESETS, VIDEO_PRESETS } from '../printer3d/backgroundManager';
+import { BACKGROUND_PRESETS } from '../printer3d/backgroundManager';
+import { useAvailableVideos } from './useAvailableVideos';
+
+// Lưu âm lượng lên server (gộp các lần kéo thanh trượt) để overlay OBS cùng nhận
+let audioTimer: ReturnType<typeof setTimeout> | null = null;
+let audioPatch: { sfxVolume?: number; bgmVolume?: number } = {};
+const saveAudioSoon = (patch: { sfxVolume?: number; bgmVolume?: number }) => {
+    audioPatch = { ...audioPatch, ...patch };
+    if (audioTimer) clearTimeout(audioTimer);
+    audioTimer = setTimeout(() => {
+        const body = audioPatch;
+        audioPatch = {};
+        api.setAudioConfig(body).catch(() => undefined);
+    }, 250);
+};
 
 interface DevControlsProps {
     sheet: Sheet;
@@ -18,6 +32,14 @@ interface DevControlsProps {
     isConnected: boolean;
     queueState: QueueState | null;
     tiktokStatus: TikTokStatus | null;
+}
+
+const TEST_NAMES = ['luna.moon', 'kai_gaming', 'mochi_cute', 'zara.dance', 'leo_official', 'nova_star', 'bao_ngoc', 'mai_anh_99', 'sky.vibes', 'ruby_rose', 'finn_live', 'lily_lofi'];
+const TEST_VIP_NAMES = ['golden_dragon', 'queen_of_gifts', 'diamond_king', 'luxury_lily'];
+
+function pickTestName(vip: boolean): string {
+    const list = vip ? TEST_VIP_NAMES : TEST_NAMES;
+    return list[Math.floor(Math.random() * list.length)];
 }
 
 export function DevControls({
@@ -64,11 +86,13 @@ export function DevControls({
     const handleChangeBgmVol = (val: number) => {
         setBgmVol(val);
         soundManager.setBgmVolume(val / 100);
+        saveAudioSoon({ bgmVolume: val / 100 });
     };
 
     const handleChangeSfxVol = (val: number) => {
         setSfxVol(val);
         soundManager.setSfxVolume(val / 100);
+        saveAudioSoon({ sfxVolume: val / 100 });
     };
 
     const handleTestSfx = (type: 'printer' | 'gold' | 'eject') => {
@@ -84,12 +108,13 @@ export function DevControls({
     };
 
     // Trạng thái Cảnh nền (Video Động hoặc Ảnh Tĩnh) & Sinh vật bay
-    const [bgMode, setBgMode] = useState<'video' | 'image'>('video');
+    const [bgMode, setBgMode] = useState<'video' | 'image'>('image');
     const [currentVideo, setCurrentVideo] = useState<string>('vd1');
     const [currentBg, setCurrentBg] = useState('mountain-mist');
     const [autoRotate, setAutoRotate] = useState(false);
     const [showButterflies, setShowButterflies] = useState(true);
     const [showBirds, setShowBirds] = useState(true);
+    const availableVideos = useAvailableVideos();
 
     const handleSwitchBgMode = (mode: 'video' | 'image') => {
         setBgMode(mode);
@@ -188,7 +213,7 @@ export function DevControls({
                 await api.sendMockFollow(randomUser);
             } else if (type === 'GIFT') {
                 if (isVip) {
-                    // Quà 1200 kim cương -> Full Page VIP
+                    // Quà 1200 kim cương -> Khung VIP vương miện (chiếm 1 hàng)
                     await api.sendMockGift(randomUser, 'Lion_King', 1200);
                 } else {
                     // Quà 150 kim cương -> Khung vàng
@@ -265,8 +290,8 @@ export function DevControls({
             slot: nextSlot,
             jobId: `job-offline-${Date.now()}`,
             userId: `user-${Date.now()}`,
-            username: isGold ? 'golden_fan_vip' : 'stream_viewer',
-            avatarUrl: null,
+            username: pickTestName(isGold),
+            avatarUrl: `/avatars/avatar-${String(1 + Math.floor(Math.random() * 12)).padStart(2, '0')}.svg`,
             frame: isGold ? 'gold' : 'normal',
             isWide,
         };
@@ -530,7 +555,7 @@ export function DevControls({
                         onClick={() => handleSendRealEvent('GIFT', true)}
                         style={actionBtnStyle('#9333ea', '#7e22ce')}
                     >
-                        👑 Tặng Quà 1200 Diamond (Full Page VIP)
+                        👑 Tặng Quà 1200 Diamond (Khung VIP vương miện)
                     </button>
                 </div>
             </div>
@@ -678,7 +703,7 @@ export function DevControls({
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                     <span style={{ fontWeight: 600, color: '#c084fc' }}>🏞️ Cảnh Nền & Sinh Vật:</span>
                     <span style={{ fontSize: '10px', color: '#a855f7', fontWeight: 'bold' }}>
-                        {bgMode === 'video' ? '🎬 Đang dùng VIDEO' : '🖼️ Đang dùng ẢNH'}
+                        {bgMode === 'video' ? '🎬 Đang dùng VIDEO' : '🌄 Cảnh sống (vô tận)'}
                     </span>
                 </div>
 
@@ -708,7 +733,7 @@ export function DevControls({
                             border: `1px solid ${bgMode === 'image' ? '#c084fc' : '#334155'}`,
                         }}
                     >
-                        🖼️ Ảnh Tĩnh
+                        🌄 Cảnh Sống (vô tận)
                     </button>
                 </div>
 
@@ -716,10 +741,10 @@ export function DevControls({
                 {bgMode === 'video' && (
                     <div style={{ marginBottom: '8px' }}>
                         <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '4px' }}>
-                            Danh sách Video 9:16 (Lặp vô tận - Hardware Decode):
+                            Video 9:16 (lặp hoà trộn liền mạch). Chim/lá 3D tự tắt vì video đã có sẵn:
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '6px' }}>
-                            {VIDEO_PRESETS.map((v) => {
+                            {availableVideos.map((v) => {
                                 const active = currentVideo === v.id;
                                 return (
                                     <button

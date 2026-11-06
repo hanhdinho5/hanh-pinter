@@ -2,7 +2,7 @@ import type { Server as HttpServer } from 'node:http';
 import { Server } from 'socket.io';
 import type { Core } from '../app.js';
 import type { RealtimeEventMap, ServerToClientEvents } from '../types/index.js';
-import { getBackgroundConfig } from '../settings.js';
+import { getAudioConfig, getBackgroundConfig } from '../settings.js';
 
 const FORWARDED: (keyof RealtimeEventMap)[] = [
     'printer:state',
@@ -15,6 +15,7 @@ const FORWARDED: (keyof RealtimeEventMap)[] = [
     'event',
     'tiktok:status',
     'background:sync',
+    'audio:sync',
 ];
 
 export const createSocketServer = (httpServer: HttpServer, core: Core, origin: string) => {
@@ -38,6 +39,7 @@ export const createSocketServer = (httpServer: HttpServer, core: Core, origin: s
         socket.emit('queue', core.queue.snapshot());
         socket.emit('tiktok:status', core.tiktok.getStatus());
         socket.emit('background:sync', getBackgroundConfig());
+        socket.emit('audio:sync', getAudioConfig());
         socket.on('disconnect', () => console.log('Client disconnected:', socket.id));
     });
 

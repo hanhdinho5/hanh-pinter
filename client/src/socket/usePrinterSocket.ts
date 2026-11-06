@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { getSocket } from './socketClient';
+import { soundManager } from '../audio/SoundManager';
 import type {
     PrinterState,
     Sheet,
@@ -8,6 +9,7 @@ import type {
     ViewerEvent,
     PrinterStatus,
     BackgroundConfig,
+    AudioConfig,
 } from '../types';
 
 export interface UsePrinterSocketOptions {
@@ -68,7 +70,7 @@ export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
 
         const onJobStarted = (job: PrintJob) => {
             const currentSpeed = printerStateRef.current?.speed ?? 1;
-            const factor = job.kind === 'fullPage' ? 2 : 1;
+            const factor = job.kind === 'fullPage' || job.frame === 'vip' ? 2 : 1;
             // 2.5s base duration * factor / speed
             const durationSec = (2.5 * factor) / currentSpeed;
 
@@ -93,6 +95,12 @@ export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
             optionsRef.current.onBackgroundSync?.(config);
         };
 
+        // Âm lượng chỉnh ở trang Admin -> áp dụng ngay cho overlay OBS / dashboard
+        const onAudioSync = (cfg: AudioConfig) => {
+            soundManager.setSfxVolume(cfg.sfxVolume);
+            soundManager.setBgmVolume(cfg.bgmVolume);
+        };
+
         socket.on('connect', onConnect);
         socket.on('disconnect', onDisconnect);
         // Cast event handlers through socket's on method
@@ -107,6 +115,7 @@ export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
         rawSocket.on('printer:sheet:completed', onSheetCompleted);
         rawSocket.on('tiktok:status', onTikTokStatus);
         rawSocket.on('background:sync', onBackgroundSync);
+        rawSocket.on('audio:sync', onAudioSync);
 
         if (socket.connected) {
             setIsConnected(true);
@@ -124,6 +133,7 @@ export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
             rawSocket.off('printer:sheet:completed', onSheetCompleted);
             rawSocket.off('tiktok:status', onTikTokStatus);
             rawSocket.off('background:sync', onBackgroundSync);
+            rawSocket.off('audio:sync', onAudioSync);
         };
     }, []);
 

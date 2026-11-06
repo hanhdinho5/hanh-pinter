@@ -37,7 +37,8 @@ export const classifyEvent = (event: ViewerEvent, gift: AppConfig['gift']): Clas
     if (event.type !== 'GIFT') return { lane: 'free', kind: 'single', frame: 'normal' };
 
     const totalDiamonds = event.diamondCount * event.giftCount;
-    if (totalDiamonds >= gift.fullPageDiamonds) return { lane: 'priority', kind: 'fullPage', frame: 'gold' };
+    // Quà VIP: chiếm 1 hàng như khung vàng nhưng khung vương miện đẹp hơn (không in nguyên trang nữa)
+    if (totalDiamonds >= gift.fullPageDiamonds) return { lane: 'priority', kind: 'single', frame: 'vip' };
     if (totalDiamonds >= gift.goldDiamonds) return { lane: 'priority', kind: 'single', frame: 'gold' };
     return { lane: 'priority', kind: 'single', frame: 'normal' };
 };

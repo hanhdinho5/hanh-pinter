@@ -11,7 +11,7 @@ export const mockPartialSheet: Sheet = {
             jobId: 'job-01',
             userId: 'user-01',
             username: 'alex_gamer99',
-            avatarUrl: null,
+            avatarUrl: '/avatars/avatar-01.svg',
             frame: 'normal',
         },
         {
@@ -19,7 +19,7 @@ export const mockPartialSheet: Sheet = {
             jobId: 'job-02',
             userId: 'user-02',
             username: 'sarah.dance',
-            avatarUrl: null,
+            avatarUrl: '/avatars/avatar-02.svg',
             frame: 'normal',
         },
         {
@@ -27,16 +27,9 @@ export const mockPartialSheet: Sheet = {
             jobId: 'job-03',
             userId: 'user-03',
             username: 'dragon_king_vip',
-            avatarUrl: null,
-            frame: 'gold', // Quà tặng > 100 kim cương
-        },
-        {
-            slot: 3,
-            jobId: 'job-04',
-            userId: 'user-04',
-            username: 'viet_live_fan',
-            avatarUrl: null,
-            frame: 'normal',
+            avatarUrl: '/avatars/avatar-03.svg',
+            frame: 'gold', // Quà tặng > 100 kim cương -> chiếm nguyên hàng
+            isWide: true,
         },
     ],
 };
@@ -52,7 +45,7 @@ export const mockFullSheet: Sheet = {
             jobId: 'job-11',
             userId: 'user-11',
             username: 'alex_streamer',
-            avatarUrl: null,
+            avatarUrl: '/avatars/avatar-05.svg',
             frame: 'normal',
         },
         {
@@ -60,7 +53,7 @@ export const mockFullSheet: Sheet = {
             jobId: 'job-12',
             userId: 'user-12',
             username: 'mia_music',
-            avatarUrl: null,
+            avatarUrl: '/avatars/avatar-06.svg',
             frame: 'normal',
         },
         {
@@ -68,7 +61,7 @@ export const mockFullSheet: Sheet = {
             jobId: 'job-13',
             userId: 'user-13',
             username: 'golden_lion_88',
-            avatarUrl: null,
+            avatarUrl: '/avatars/avatar-07.svg',
             frame: 'gold',
         },
         {
@@ -76,7 +69,7 @@ export const mockFullSheet: Sheet = {
             jobId: 'job-14',
             userId: 'user-14',
             username: 'tommy_boy',
-            avatarUrl: null,
+            avatarUrl: '/avatars/avatar-08.svg',
             frame: 'normal',
         },
         {
@@ -84,7 +77,7 @@ export const mockFullSheet: Sheet = {
             jobId: 'job-15',
             userId: 'user-15',
             username: 'luna_celestial',
-            avatarUrl: null,
+            avatarUrl: '/avatars/avatar-09.svg',
             frame: 'gold',
         },
         {
@@ -92,7 +85,7 @@ export const mockFullSheet: Sheet = {
             jobId: 'job-16',
             userId: 'user-16',
             username: 'shadow_ninja',
-            avatarUrl: null,
+            avatarUrl: '/avatars/avatar-10.svg',
             frame: 'normal',
         },
     ],
@@ -109,7 +102,7 @@ export const mockSpecialSheet: Sheet = {
             jobId: 'job-vip-999',
             userId: 'user-superstar',
             username: 'KING_OF_DONORS',
-            avatarUrl: null,
+            avatarUrl: '/avatars/avatar-11.svg',
             frame: 'gold',
         },
     ],

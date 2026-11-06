@@ -13,7 +13,8 @@ export interface ViewerEvent {
     diamondCount: number;
 }
 
-export type FrameType = 'normal' | 'gold';
+/** gold: quà ≥ ngưỡng vàng; vip: quà ≥ ngưỡng VIP (khung vương miện). Cả hai đều chiếm nguyên 1 hàng. */
+export type FrameType = 'normal' | 'gold' | 'vip';
 export type JobKind = 'single' | 'fullPage';
 export type JobLane = 'free' | 'priority';
 export type JobStatus = 'pending' | 'printing' | 'completed' | 'failed';
@@ -43,6 +44,8 @@ export interface SheetEntry {
     avatarUrl: string | null;
     frame: FrameType;
     isWide?: boolean;
+    /** Tờ mà server đã xếp avatar này vào (để client vẽ đúng tờ khi bị chậm nhịp) */
+    sheetId?: number;
 }
 
 export interface Sheet {
@@ -81,6 +84,11 @@ export interface TikTokStatus {
     reconnectAttempts: number;
 }
 
+export interface AudioConfig {
+    sfxVolume: number;
+    bgmVolume: number;
+}
+
 export interface BackgroundConfig {
     presetId: string;
     autoRotate: boolean;
@@ -100,5 +108,6 @@ export interface RealtimeEventMap {
     event: [ViewerEvent];
     'tiktok:status': [TikTokStatus];
     'background:sync': [BackgroundConfig];
+    'audio:sync': [AudioConfig];
 }
 
