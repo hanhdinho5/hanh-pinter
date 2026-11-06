@@ -8,7 +8,11 @@ import { createSocketServer } from './socket/index.js';
 
 // Treo live cả buổi: một lỗi lẻ (thư viện TikTok, mạng) không được làm sập server
 process.on('unhandledRejection', (reason) => console.error('[unhandledRejection]', reason));
-process.on('uncaughtException', (err) => console.error('[uncaughtException]', err));
+process.on('uncaughtException', (err) => {
+    // Trạng thái có thể đã hỏng: thoát để live.bat bật lại server sạch sau 5 giây
+    console.error('[uncaughtException]', err);
+    process.exit(1);
+});
 
 const core = createCore();
 const app = express();

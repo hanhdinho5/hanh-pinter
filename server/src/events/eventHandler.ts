@@ -51,7 +51,25 @@ export class EventHandler {
         private readonly bus: Bus,
         private readonly giftConfig: AppConfig['gift'],
         private readonly maxFreeQueue: number = Infinity,
+        /** Một người chỉ được in miễn phí lại sau khoảng này (ms); 0 = chỉ chặn trùng trong 1 tờ */
+        private readonly freeCooldownMs: number = 0,
     ) {}
+
+    private readonly lastFreePrint = new Map<string, number>();
+
+    private inCooldown(userId: string, now: number): boolean {
+        if (this.freeCooldownMs <= 0) return false;
+        const last = this.lastFreePrint.get(userId);
+        return last !== undefined && now - last < this.freeCooldownMs;
+    }
+
+    private markFreePrint(userId: string, now: number): void {
+        if (this.freeCooldownMs <= 0) return;
+        if (this.lastFreePrint.size > 5000) {
+            for (const [id, t] of this.lastFreePrint) if (now - t >= this.freeCooldownMs) this.lastFreePrint.delete(id);
+        }
+        this.lastFreePrint.set(userId, now);
+    }
 
     handle(input: NewEventInput): HandleResult {
         const event = normalizeEvent(input);
@@ -60,7 +78,12 @@ export class EventHandler {
         const rule = classifyEvent(event, this.giftConfig);
 
         // Chỉ lượt in miễn phí mới bị giới hạn 1 lần/tờ; gift luôn được in.
-        if (rule.lane === 'free' && (this.sheets.hasUser(event.userId) || this.queue.hasFreeJobFor(event.userId))) {
+        if (
+            rule.lane === 'free' &&
+            (this.sheets.hasUser(event.userId) ||
+                this.queue.hasFreeJobFor(event.userId) ||
+                this.inCooldown(event.userId, event.timestamp))
+        ) {
             return { accepted: false, reason: 'duplicate', event };
         }
         if (rule.lane === 'free' && this.queue.freeSize >= this.maxFreeQueue) {
@@ -81,6 +104,7 @@ export class EventHandler {
             sheetId: null,
             slot: null,
         };
+        if (rule.lane === 'free') this.markFreePrint(event.userId, event.timestamp);
         this.queue.enqueue(job);
         this.engine.kick();
         return { accepted: true, job, event };

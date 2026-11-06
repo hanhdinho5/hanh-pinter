@@ -34,10 +34,15 @@ function DashboardView() {
     const [currentVideoId, setCurrentVideoId] = useState<string>('vd1');
 
     const printerRef = useRef<PrinterCanvasHandle | null>(null);
+    /** true = tờ giấy kế tiếp server gửi sẽ đặt lại toàn bộ cảnh in */
+    const resyncRef = useRef(true);
     const isPrintingRef = useRef(false);
 
     // 2. Kết nối Socket.IO thời gian thực với Server (:3001)
     const { isConnected, currentSheet, queueState, status, setStatus, tiktokStatus, backgroundConfig } = usePrinterSocket({
+        onConnect: () => {
+            resyncRef.current = true;
+        },
         onJobStarted: (job: PrintJob, durationSeconds: number) => {
             isPrintingRef.current = true;
 
@@ -78,6 +83,11 @@ function DashboardView() {
         },
         onSheetUpdate: (updatedSheet: Sheet) => {
             // Scene tự giữ avatar đang/vừa in, nên luôn nhận dữ liệu mới (trước đây bỏ qua khi đang in -> hình trước bị mất)
+            if (resyncRef.current) {
+                // Lần đầu / vừa kết nối lại (server có thể đã khởi động lại): đặt lại tờ, không ghép avatar cũ
+                resyncRef.current = false;
+                printerRef.current?.resetSheet(updatedSheet);
+            }
             setSheet(updatedSheet);
         },
         onBackgroundSync: (config) => {
@@ -167,7 +177,7 @@ function DashboardView() {
                         printerRef.current?.setBackground(presetId);
                         printerRef.current?.setBackgroundMode('image');
                         setBgMode('image');
-                        void api.setBackgroundConfig({ presetId });
+                        api.setBackgroundConfig({ presetId }).catch(() => undefined);
                     }}
                     onUploadCustomImage={(dataUrl) => {
                         printerRef.current?.applyCustomBackground(dataUrl);
@@ -177,17 +187,17 @@ function DashboardView() {
                     autoRotate={backgroundConfig?.autoRotate ?? false}
                     onToggleAutoRotate={(enabled) => {
                         printerRef.current?.setAutoRotate(enabled, 5);
-                        void api.setBackgroundConfig({ autoRotate: enabled });
+                        api.setBackgroundConfig({ autoRotate: enabled }).catch(() => undefined);
                     }}
                     showButterflies={backgroundConfig?.showButterflies ?? true}
                     onToggleButterflies={(enabled) => {
                         printerRef.current?.setCreaturesVisible(enabled, backgroundConfig?.showBirds ?? true);
-                        void api.setBackgroundConfig({ showButterflies: enabled });
+                        api.setBackgroundConfig({ showButterflies: enabled }).catch(() => undefined);
                     }}
                     showBirds={backgroundConfig?.showBirds ?? true}
                     onToggleBirds={(enabled) => {
                         printerRef.current?.setCreaturesVisible(backgroundConfig?.showButterflies ?? true, enabled);
-                        void api.setBackgroundConfig({ showBirds: enabled });
+                        api.setBackgroundConfig({ showBirds: enabled }).catch(() => undefined);
                     }}
                     onTriggerBirds={() => {
                         printerRef.current?.triggerBirdFlock();

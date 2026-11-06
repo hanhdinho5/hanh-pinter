@@ -301,7 +301,9 @@ export class BackgroundManager {
     }
 
     public applyVideo(videoId: string): void {
+        // Đang phát đúng video này rồi -> không nạp lại (tránh giật hình mỗi lần đồng bộ cài đặt)
         const preset = VIDEO_PRESETS.find((v) => v.id === videoId) ?? VIDEO_PRESETS[0];
+        if (this.currentVideo.id === preset.id) return;
         this.currentVideo = preset;
         this.loadVideoSources(preset.url);
     }

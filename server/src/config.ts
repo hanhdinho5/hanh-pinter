@@ -33,6 +33,8 @@ export const config = {
     queue: {
         /** Số lượt in miễn phí tối đa đang chờ; vượt thì bỏ comment/follow mới (tránh in trễ hàng chục phút). */
         maxFree: num('MAX_FREE_QUEUE', 30),
+        /** Mỗi người được in miễn phí (comment/follow) tối đa 1 lần trong khoảng này (phút). */
+        freeCooldownMinutes: num('FREE_COOLDOWN_MINUTES', 10),
     },
     /** Số job đã hoàn tất giữ lại trong bộ nhớ. */
     historyLimit: 50,

@@ -16,6 +16,7 @@ const FORWARDED: (keyof RealtimeEventMap)[] = [
     'tiktok:status',
     'background:sync',
     'audio:sync',
+    'audio:next',
 ];
 
 export const createSocketServer = (httpServer: HttpServer, core: Core, origin: string) => {

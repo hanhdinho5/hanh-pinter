@@ -34,7 +34,7 @@ test('chat từ cùng một người chỉ in một lần trên mỗi tờ', () 
 });
 
 test('hàng đợi miễn phí đầy thì bỏ comment mới, quà vẫn vào', () => {
-    const core = createCore({ ...config, queue: { maxFree: 3 } });
+    const core = createCore({ ...config, queue: { ...config.queue, maxFree: 3 } });
     core.engine.pause();
     for (let i = 0; i < 10; i++) core.tiktok.simulate('chat', { user: user(`v${i}`) });
     assert.equal(core.queue.snapshot().pendingFree.length, 3);

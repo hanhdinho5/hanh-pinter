@@ -34,6 +34,8 @@ export interface PrintJob {
     completedAt: number | null;
     sheetId: number | null;
     slot: number | null;
+    /** Thời gian in thực tế (ms) server dùng cho job này */
+    durationMs?: number;
 }
 
 export interface SheetEntry {
@@ -87,6 +89,8 @@ export interface TikTokStatus {
 export interface AudioConfig {
     sfxVolume: number;
     bgmVolume: number;
+    bgmEnabled: boolean;
+    muted: boolean;
 }
 
 export interface BackgroundConfig {
@@ -95,6 +99,8 @@ export interface BackgroundConfig {
     intervalMinutes: number;
     showButterflies: boolean;
     showBirds: boolean;
+    mode?: 'image' | 'video';
+    videoId?: string;
 }
 
 export interface RealtimeEventMap {
@@ -109,5 +115,7 @@ export interface RealtimeEventMap {
     'tiktok:status': [TikTokStatus];
     'background:sync': [BackgroundConfig];
     'audio:sync': [AudioConfig];
+    /** Admin bấm "Bài kế": overlay chuyển bài nhạc nền */
+    'audio:next': [];
 }
 

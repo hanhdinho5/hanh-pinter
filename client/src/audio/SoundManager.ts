@@ -43,6 +43,8 @@ class SoundManager {
         } catch {
             // ignore
         }
+        // Nhạc nền bị chặn trước đó -> phát lại ngay khi được phép
+        if (this.bgmWanted && !this.isBgmPlaying) this.playCurrentBgmTrack();
     }
 
     private getContext(): AudioContext {
@@ -109,27 +111,78 @@ class SoundManager {
         });
     }
 
-    /** Phát lặp file tiếng bút thật, mỗi lần bắt đầu ở một vị trí ngẫu nhiên cho đỡ lặp lại. */
+    /**
+     * Phát lặp file tiếng bút thật qua chuỗi lọc "êm tai":
+     * - Cắt ù tần thấp và tiếng rít chói tần cao (gắt nhất khi nghe qua livestream).
+     * - Thêm chút ấm ở dải trung trầm như bút chì mềm trên giấy dày.
+     * - Âm lượng nhấp nhô theo nhịp tay tô (nét đi - nét về), không đều đều như máy.
+     * - Nén nhẹ cho tiếng mượt, không giật to nhỏ.
+     */
     private startFilePrintSound(isGold: boolean): void {
         if (!this.penBuffer) return;
         try {
             const ctx = this.getContext();
             const now = ctx.currentTime;
-            const gain = ctx.createGain();
-            const level = this.penBufferGain * (isGold ? 1.0 : 0.9) * this.sfxVolume;
-            gain.gain.setValueAtTime(0, now);
-            gain.gain.linearRampToValueAtTime(level, now + 0.08);
-            gain.connect(ctx.destination);
+
+            const out = ctx.createGain();
+            const level = this.penBufferGain * (isGold ? 0.62 : 0.55) * this.sfxVolume;
+            out.gain.setValueAtTime(0, now);
+            out.gain.linearRampToValueAtTime(level, now + 0.15);
+            out.connect(ctx.destination);
+
+            const comp = ctx.createDynamicsCompressor();
+            comp.threshold.value = -26;
+            comp.knee.value = 18;
+            comp.ratio.value = 3;
+            comp.attack.value = 0.01;
+            comp.release.value = 0.2;
+            comp.connect(out);
+
+            // Nhịp tay tô: ~3 nét/giây, mỗi nét nhấn rồi nhả
+            const stroke = ctx.createGain();
+            stroke.gain.value = 0.72;
+            const strokeLfo = ctx.createOscillator();
+            strokeLfo.type = 'sine';
+            strokeLfo.frequency.value = 2.6 + Math.random() * 0.8;
+            const strokeDepth = ctx.createGain();
+            strokeDepth.gain.value = 0.28;
+            strokeLfo.connect(strokeDepth);
+            strokeDepth.connect(stroke.gain);
+            stroke.connect(comp);
+
+            const lowCut = ctx.createBiquadFilter();
+            lowCut.type = 'highpass';
+            lowCut.frequency.value = 180;
+            const warmth = ctx.createBiquadFilter();
+            warmth.type = 'peaking';
+            warmth.frequency.value = 900;
+            warmth.Q.value = 0.8;
+            warmth.gain.value = 3.5;
+            const deEss = ctx.createBiquadFilter();
+            deEss.type = 'peaking';
+            deEss.frequency.value = 4200;
+            deEss.Q.value = 1.2;
+            deEss.gain.value = -6;
+            const highCut = ctx.createBiquadFilter();
+            highCut.type = 'lowpass';
+            highCut.frequency.value = isGold ? 7000 : 6200;
+            highCut.Q.value = 0.5;
+            lowCut.connect(warmth);
+            warmth.connect(deEss);
+            deEss.connect(highCut);
+            highCut.connect(stroke);
 
             const src = ctx.createBufferSource();
             src.buffer = this.penBuffer;
             src.loop = true;
-            src.playbackRate.value = 0.94 + Math.random() * 0.12;
-            src.connect(gain);
+            src.playbackRate.value = 0.92 + Math.random() * 0.08;
+            src.connect(lowCut);
             src.start(now, Math.random() * this.penBuffer.duration);
+            strokeLfo.start(now);
 
-            this.printGainNode = gain;
+            this.printGainNode = out;
             this.penFileSource = src;
+            this.paperStrokeLFO = strokeLfo;
         } catch (err) {
             console.warn('[SoundManager] Lỗi phát file tiếng bút:', err);
             this.startSynthesizedPrintSound(isGold);
@@ -183,20 +236,20 @@ class SoundManager {
             // 2. Lớp 1: Tiếng cọ xát đầu ngòi bút (Bandpass Filter 2700Hz, Q = 2.4)
             const frictionFilter = ctx.createBiquadFilter();
             frictionFilter.type = 'bandpass';
-            frictionFilter.frequency.setValueAtTime(2700, now);
-            frictionFilter.Q.setValueAtTime(2.4, now);
+            frictionFilter.frequency.setValueAtTime(1600, now);
+            frictionFilter.Q.setValueAtTime(0.9, now);
 
             // 3. Lớp 2: Tiếng rột roạt xì xào thoáng nhẹ của thớ giấy (Highpass 4500Hz)
             const whisperFilter = ctx.createBiquadFilter();
             whisperFilter.type = 'highpass';
-            whisperFilter.frequency.setValueAtTime(4500, now);
+            whisperFilter.frequency.setValueAtTime(3200, now);
             whisperFilter.Q.setValueAtTime(0.7, now);
 
             // 4. Bộ điều chế nhịp nét vẽ (Stroke Rhythm LFO):
             // Mô phỏng nhịp bút lia qua lại trên giấy (~7.5 nét vẽ/giây)
             const strokeLFO = ctx.createOscillator();
-            strokeLFO.type = 'triangle';
-            strokeLFO.frequency.setValueAtTime(7.5, now);
+            strokeLFO.type = 'sine';
+            strokeLFO.frequency.setValueAtTime(3, now);
 
             // Điều chế cường độ âm thanh theo nhịp vẽ (độ sâu ~0.35)
             const strokeGain = ctx.createGain();
@@ -214,7 +267,7 @@ class SoundManager {
 
             // Gain cho lớp xì xào thớ giấy
             const whisperGain = ctx.createGain();
-            whisperGain.gain.setValueAtTime(0.25, now);
+            whisperGain.gain.setValueAtTime(0.1, now);
 
             // Kết nối chuỗi âm thanh
             noiseSource.connect(frictionFilter);
@@ -359,20 +412,45 @@ class SoundManager {
     // BGM: NHẠC NỀN LIVESTREAM LOFI
     // =========================================================================
 
+    /** Người dùng muốn nhạc nền đang phát (kể cả khi trình duyệt tạm chặn tự phát) */
+    private bgmWanted = false;
+    /** Số bài lỗi liên tiếp: lỗi cả vòng thì dừng, không thử mãi */
+    private bgmFailures = 0;
+    private bgmRetryTimer: ReturnType<typeof setTimeout> | null = null;
+    private bgmListeners = new Set<(playing: boolean) => void>();
+
+    /** Theo dõi trạng thái phát thật (để giao diện hiển thị đúng). */
+    public onBgmChange(cb: (playing: boolean) => void): () => void {
+        this.bgmListeners.add(cb);
+        return () => this.bgmListeners.delete(cb);
+    }
+
+    private setBgmPlaying(playing: boolean): void {
+        if (this.isBgmPlaying === playing) return;
+        this.isBgmPlaying = playing;
+        for (const cb of this.bgmListeners) cb(playing);
+    }
+
     /**
      * Bắt đầu phát nhạc nền
      */
     public startBgm(): void {
+        this.bgmWanted = true;
         if (this.isBgmPlaying) return;
 
         if (!this.bgmAudio) {
             this.bgmAudio = new Audio();
             this.bgmAudio.volume = this.isMuted ? 0 : this.bgmVolume;
-            this.bgmAudio.addEventListener('ended', () => {
-                this.playNextBgmTrack();
+            this.bgmAudio.addEventListener('ended', () => this.playNextBgmTrack());
+            // File thiếu / hỏng -> chuyển bài kế, lỗi hết cả danh sách thì dừng
+            this.bgmAudio.addEventListener('error', () => this.onBgmTrackFailed());
+            this.bgmAudio.addEventListener('playing', () => {
+                this.bgmFailures = 0;
+                this.setBgmPlaying(true);
             });
+            this.bgmAudio.addEventListener('pause', () => this.setBgmPlaying(false));
         }
-
+        this.bgmFailures = 0;
         this.playCurrentBgmTrack();
     }
 
@@ -380,34 +458,58 @@ class SoundManager {
      * Tạm dừng phát nhạc nền
      */
     public stopBgm(): void {
-        if (this.bgmAudio) {
-            this.bgmAudio.pause();
-        }
-        this.isBgmPlaying = false;
+        this.bgmWanted = false;
+        if (this.bgmRetryTimer) clearTimeout(this.bgmRetryTimer);
+        this.bgmRetryTimer = null;
+        this.bgmAudio?.pause();
+        this.setBgmPlaying(false);
     }
 
     private playCurrentBgmTrack(): void {
-        if (!this.bgmAudio || this.bgmPlaylist.length === 0) return;
+        if (!this.bgmAudio || this.bgmPlaylist.length === 0 || !this.bgmWanted) return;
 
         const trackUrl = this.bgmPlaylist[this.currentBgmIndex];
-        this.bgmAudio.src = trackUrl;
+        if (!this.bgmAudio.src.endsWith(trackUrl)) this.bgmAudio.src = trackUrl;
         this.bgmAudio.volume = this.isMuted ? 0 : this.bgmVolume;
 
-        const playPromise = this.bgmAudio.play();
-        if (playPromise) {
-            playPromise
-                .then(() => {
-                    this.isBgmPlaying = true;
-                })
-                .catch(() => {
-                    // Trình duyệt có thể chặn autoplay nếu người dùng chưa tương tác chuột
-                    console.log('[SoundManager] Chờ người dùng tương tác để bật nhạc nền BGM');
-                    this.isBgmPlaying = false;
-                });
+        this.bgmAudio.play().catch((err: unknown) => {
+            const name = (err as { name?: string } | null)?.name;
+            if (name === 'NotAllowedError') {
+                // Trình duyệt chặn tự phát: thử lại khi có tương tác hoặc sau ít giây (OBS / LIVE Studio)
+                console.log('[SoundManager] Trình duyệt tạm chặn tự phát nhạc nền, sẽ thử lại');
+                this.scheduleBgmRetry();
+            }
+            // File hỏng/thiếu: sự kiện 'error' của thẻ audio sẽ tự chuyển bài
+        });
+    }
+
+    private scheduleBgmRetry(): void {
+        if (this.bgmRetryTimer || !this.bgmWanted) return;
+        this.bgmRetryTimer = setTimeout(() => {
+            this.bgmRetryTimer = null;
+            if (this.bgmWanted && !this.isBgmPlaying) this.playCurrentBgmTrack();
+        }, 5000);
+    }
+
+    private onBgmTrackFailed(): void {
+        this.bgmFailures++;
+        if (this.bgmFailures >= this.bgmPlaylist.length) {
+            console.warn('[SoundManager] Không phát được bài nhạc nền nào trong client/public/music/');
+            this.setBgmPlaying(false);
+            return;
         }
+        this.currentBgmIndex = (this.currentBgmIndex + 1) % this.bgmPlaylist.length;
+        this.playCurrentBgmTrack();
     }
 
     public nextTrack(): void {
+        this.bgmWanted = true;
+        if (!this.bgmAudio) {
+            this.currentBgmIndex = (this.currentBgmIndex + 1) % this.bgmPlaylist.length;
+            this.startBgm();
+            return;
+        }
+        this.bgmFailures = 0;
         this.playNextBgmTrack();
     }
 
@@ -446,14 +548,19 @@ class SoundManager {
         return this.bgmVolume;
     }
 
-    public toggleMute(): boolean {
-        this.isMuted = !this.isMuted;
+    /** Đặt trạng thái tắt tiếng (gọi nhiều lần vẫn cho cùng kết quả). */
+    public setMuted(muted: boolean): void {
+        this.isMuted = muted;
         if (this.bgmAudio) {
-            this.bgmAudio.volume = this.isMuted ? 0 : this.bgmVolume;
+            this.bgmAudio.volume = muted ? 0 : this.bgmVolume;
         }
-        if (this.isMuted && this.isPrintingSoundActive) {
+        if (muted && this.isPrintingSoundActive) {
             this.stopPrintSound();
         }
+    }
+
+    public toggleMute(): boolean {
+        this.setMuted(!this.isMuted);
         return this.isMuted;
     }
 
@@ -463,6 +570,10 @@ class SoundManager {
 
     public getBgmPlaying(): boolean {
         return this.isBgmPlaying;
+    }
+
+    public isBgmWanted(): boolean {
+        return this.bgmWanted;
     }
 }
 

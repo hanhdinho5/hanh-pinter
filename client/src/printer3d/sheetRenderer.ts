@@ -43,6 +43,77 @@ export function fallbackAvatarUrl(username: string): string {
     return `/avatars/avatar-${String(idx).padStart(2, '0')}.svg`;
 }
 
+/**
+ * Kho avatar dùng chung cho mọi tờ giấy (tờ trên + tờ dưới): mỗi ảnh chỉ tải 1 lần,
+ * chỉ giữ MAX_AVATARS ảnh gần nhất trong RAM (không lưu ổ đĩa),
+ * ảnh lỗi được ghi nhớ để không tải lại liên tục.
+ */
+// Chỉ cần ảnh của tờ đang hiện + tờ bên dưới + vài hình đang chờ vẽ; tờ đã qua thì ảnh bị bỏ
+const MAX_AVATARS = 24;
+const avatarStore = {
+    images: new Map<string, HTMLImageElement>(),
+    loading: new Map<string, (() => void)[]>(),
+    failed: new Map<string, number>(),
+
+    get(url: string): HTMLImageElement | null {
+        const img = this.images.get(url);
+        if (!img) return null;
+        // LRU: đưa lên cuối
+        this.images.delete(url);
+        this.images.set(url, img);
+        return img;
+    },
+
+    hasFailed(url: string): boolean {
+        const at = this.failed.get(url);
+        if (at === undefined) return false;
+        // Cho thử lại sau 10 phút (ảnh có thể chỉ lỗi tạm thời)
+        if (Date.now() - at > 10 * 60_000) {
+            this.failed.delete(url);
+            return false;
+        }
+        return true;
+    },
+
+    load(url: string, onDone: () => void): void {
+        if (!url || this.images.has(url) || this.hasFailed(url)) return;
+        const waiting = this.loading.get(url);
+        if (waiting) {
+            waiting.push(onDone);
+            return;
+        }
+        this.loading.set(url, [onDone]);
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.decoding = 'async';
+        // Avatar TikTok đi qua proxy của server (CDN không có CORS)
+        const remote = /^https?:\/\/(?!localhost)/.test(url) && !url.includes('/api/avatar');
+        const serverUrl =
+            (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_SERVER_URL ??
+            `${window.location.protocol}//${window.location.hostname}:3001`;
+        const finish = () => {
+            const cbs = this.loading.get(url) ?? [];
+            this.loading.delete(url);
+            for (const cb of cbs) cb();
+        };
+        img.onload = () => {
+            this.images.set(url, img);
+            while (this.images.size > MAX_AVATARS) {
+                const oldest = this.images.keys().next().value;
+                if (oldest === undefined) break;
+                this.images.delete(oldest);
+            }
+            finish();
+        };
+        img.onerror = () => {
+            this.failed.set(url, Date.now());
+            if (this.failed.size > 1000) this.failed.clear();
+            finish();
+        };
+        img.src = remote ? `${serverUrl}/api/avatar?url=${encodeURIComponent(url)}` : url;
+    },
+};
+
 type RenderArgs = [Sheet, number | null, number, SheetEntry | undefined, number];
 
 /**
@@ -54,11 +125,12 @@ export class SheetCanvasRenderer {
     public ctx: CanvasRenderingContext2D;
     public texture: THREE.CanvasTexture;
 
-    private imageCache = new Map<string, HTMLImageElement>();
-    private loading = new Set<string>();
     private paperBase: HTMLCanvasElement;
     private lastArgs: RenderArgs | null = null;
     private redrawQueued = false;
+    /** Ảnh chụp phần tĩnh của tờ khi đang in một ô */
+    private staticLayer: HTMLCanvasElement | null = null;
+    private staticKey: string | null = null;
     /** Kích thước logic (toạ độ bố cục) — canvas thật lớn hơn `scale` lần cho chữ/ảnh sắc nét */
     private W: number;
     private H: number;
@@ -92,39 +164,24 @@ export class SheetCanvasRenderer {
     // ------------------------------------------------------------------ ẢNH AVATAR
 
     public preloadAvatar(url: string, onLoaded?: () => void): void {
-        if (!url || this.imageCache.has(url) || this.loading.has(url)) return;
-        this.loading.add(url);
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        // Avatar TikTok đi qua proxy của server (CDN không có CORS)
-        const remote = /^https?:\/\/(?!localhost)/.test(url) && !url.includes('/api/avatar');
-        const serverUrl =
-            (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_SERVER_URL ??
-            `${window.location.protocol}//${window.location.hostname}:3001`;
-        img.src = remote ? `${serverUrl}/api/avatar?url=${encodeURIComponent(url)}` : url;
-        img.onload = () => {
-            this.loading.delete(url);
-            this.imageCache.set(url, img);
+        avatarStore.load(url, () => {
             onLoaded?.();
             this.queueRedraw();
-        };
-        img.onerror = () => {
-            // Ảnh lỗi -> nhớ lại bằng ảnh dự phòng để không thử tải lại liên tục
-            this.loading.delete(url);
-            const fb = fallbackAvatarUrl(url);
-            if (fb !== url) {
-                this.preloadAvatar(fb, () => {
-                    const fbImg = this.imageCache.get(fb);
-                    if (fbImg) this.imageCache.set(url, fbImg);
-                });
-            }
-        };
+        });
     }
 
     private getAvatarImage(entry: SheetEntry): HTMLImageElement | null {
-        const url = entry.avatarUrl || fallbackAvatarUrl(entry.username);
-        const img = this.imageCache.get(url);
+        const fallback = fallbackAvatarUrl(entry.username);
+        const url = entry.avatarUrl || fallback;
+        const img = avatarStore.get(url);
         if (img) return img;
+        if (avatarStore.hasFailed(url)) {
+            // Ảnh thật lỗi (TikTok chặn / hết hạn) -> dùng avatar dự phòng theo tên, không thử tải lại
+            const fb = avatarStore.get(fallback);
+            if (fb) return fb;
+            this.preloadAvatar(fallback);
+            return null;
+        }
         this.preloadAvatar(url);
         return null;
     }
@@ -133,6 +190,7 @@ export class SheetCanvasRenderer {
     private queueRedraw(): void {
         if (this.redrawQueued || !this.lastArgs) return;
         this.redrawQueued = true;
+        this.staticKey = null; // ảnh/font mới tải xong -> chụp lại phần tĩnh
         requestAnimationFrame(() => {
             this.redrawQueued = false;
             if (this.lastArgs) this.renderSheetProgress(...this.lastArgs);
@@ -158,6 +216,35 @@ export class SheetCanvasRenderer {
         gleam = 0.0
     ): void {
         this.lastArgs = [sheet, activeSlot, progress, activeEntry, gleam];
+
+        // Đang in: phần còn lại của tờ không đổi -> chụp sẵn 1 lần, mỗi khung hình chỉ vẽ lại ô đang in
+        const cell = sheet.kind !== 'special' && activeSlot !== null && activeEntry ? this.activeCell(activeSlot, activeEntry) : null;
+        if (cell) {
+            const key = `${sheet.id}|${activeSlot}|${activeEntry?.jobId}|${sheet.entries.map((e) => `${e.slot}:${e.jobId}`).join(',')}`;
+            if (key !== this.staticKey) {
+                this.drawPaperBase(0, 0, this.W, this.H);
+                this.renderStandardGrid(sheet, activeSlot, 0, activeEntry, 0);
+                this.staticLayer ??= document.createElement('canvas');
+                this.staticLayer.width = this.canvas.width;
+                this.staticLayer.height = this.canvas.height;
+                this.staticLayer.getContext('2d')!.drawImage(this.canvas, 0, 0);
+                this.staticKey = key;
+            }
+            this.ctx.save();
+            this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+            this.ctx.drawImage(this.staticLayer!, 0, 0);
+            this.ctx.restore();
+            // Ô đang in vẽ lại từ nền giấy trắng (tránh vòng nét đứt bị vẽ chồng đậm dần)
+            this.drawPaperBase(cell.x, cell.y, cell.w, cell.h);
+            this.withPrintClip(cell.x, cell.y, cell.w, cell.h, progress, cell.tier, () =>
+                this.renderEntry(cell.x, cell.y, cell.w, cell.h, activeEntry!, cell.tier, gleam)
+            );
+            this.renderHeader(sheet);
+            this.renderFooterPerforation();
+            this.texture.needsUpdate = true;
+            return;
+        }
+        this.staticKey = null;
 
         this.drawPaperBase(0, 0, this.W, this.H);
 
@@ -277,6 +364,18 @@ export class SheetCanvasRenderer {
         return { x: 50, y, w: width - 100, h: height - y - 80 };
     }
 
+    /** Vị trí + cỡ ô đang in trong lưới 2 hàng (quà to chiếm cả hàng) */
+    private activeCell(slot: number, entry: SheetEntry): { x: number; y: number; w: number; h: number; tier: Tier } {
+        const L = this.gridLayout();
+        const row = slot < 2 ? 0 : 1;
+        const y = L.startY + row * (L.rowH + L.gapY);
+        const wide = Boolean(entry.isWide || entry.frame !== 'normal');
+        const tier: Tier = entry.frame === 'vip' ? 'legend' : entry.frame === 'gold' || wide ? 'gold' : 'normal';
+        if (wide) return { x: L.startX, y, w: L.wideW, h: L.rowH, tier };
+        const col = slot % 2;
+        return { x: L.startX + col * (L.normalW + L.gapX), y, w: L.normalW, h: L.rowH, tier };
+    }
+
     private renderStandardGrid(
         sheet: Sheet,
         activeSlot: number | null,
@@ -355,8 +454,8 @@ export class SheetCanvasRenderer {
         ctx.beginPath();
         ctx.rect(x - 60, y - 60, w + 120, printedH + 60);
         ctx.clip();
-        // Xoá vòng nét đứt ở phần đã in rồi vẽ nội dung
-        this.drawPaperBase(x - 60, y - 60, w + 120, printedH + 60);
+        // Xoá vòng nét đứt ở phần đã in (chỉ trong ô, không lẹm sang ô bên cạnh) rồi vẽ nội dung
+        this.drawPaperBase(x, y, w, printedH);
         draw();
         ctx.restore();
 

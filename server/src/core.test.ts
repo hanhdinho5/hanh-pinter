@@ -83,7 +83,7 @@ test('pause/resume: job đang in xong rồi dừng, resume thì chạy tiếp', 
 });
 
 test('không mất job khi nhận nhiều event liên tục', async () => {
-    const { handler, engine, sheets } = createCore({ ...fast, queue: { maxFree: 1000 } });
+    const { handler, engine, sheets } = createCore({ ...fast, queue: { ...fast.queue, maxFree: 1000 } });
     for (let i = 0; i < 50; i++) handler.handle(comment(`m${i}`));
     await engine.idle();
     assert.equal(sheets.completedCount * 4 + sheets.current.entries.length, 50);
@@ -133,4 +133,46 @@ test('đổi tờ TRƯỚC khi bắt đầu in (client vẽ đúng tờ, đúng 
     assert.ok(log.includes('completed#2'));
     assert.equal(sheets.current.id, 3);
     assert.equal(sheets.current.entries.length, 0);
+});
+
+test('mỗi người chỉ được in miễn phí 1 lần trong thời gian chờ, quà vẫn luôn được in', async () => {
+    const { handler, engine } = createCore({ ...fast, queue: { ...fast.queue, freeCooldownMinutes: 10 } });
+    assert.equal(handler.handle(comment('u1')).accepted, true);
+    await engine.idle();
+    // sang tờ khác vẫn bị chặn vì còn trong thời gian chờ
+    for (let i = 0; i < 4; i++) handler.handle(comment(`x${i}`));
+    await engine.idle();
+    const again = handler.handle(comment('u1'));
+    assert.equal(again.accepted, false);
+    const gift = handler.handle({ type: 'GIFT', userId: 'u1', username: 'u1', diamondCount: 1, giftCount: 1 });
+    assert.equal(gift.accepted, true);
+    await engine.idle();
+});
+
+test('quà thường không chiếm hết lượt: cứ 3 quà thì nhường 1 comment', async () => {
+    const { handler, engine, bus } = createCore(fast);
+    engine.pause();
+    for (let i = 0; i < 6; i++) handler.handle({ type: 'GIFT', userId: `g${i}`, username: `g${i}`, diamondCount: 1, giftCount: 1 });
+    handler.handle(comment('c1'));
+    const order: string[] = [];
+    bus.on('printer:job:started', (job) => order.push(job.userId));
+    engine.resume();
+    await engine.idle();
+    assert.deepEqual(order.slice(0, 5), ['g0', 'g1', 'g2', 'c1', 'g3']);
+});
+
+test('combo quà bị tự in sớm thì tín hiệu kết thúc đến muộn chỉ in phần còn lại', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+    const core = createCore(fast);
+    const counts: number[] = [];
+    core.bus.on('event', (e) => { if (e.type === 'GIFT') counts.push(e.giftCount); });
+    const raw = (repeatCount: number, repeatEnd = false) => ({
+        user: { userId: 'u9', uniqueId: 'u9' },
+        giftId: 5655, giftName: 'Rose', diamondCount: 1, giftType: 1, repeatCount, repeatEnd,
+        giftDetails: { giftType: 1 },
+    });
+    core.tiktok.simulate('gift', raw(3));
+    t.mock.timers.tick(4100); // im lặng -> tự in 3
+    core.tiktok.simulate('gift', raw(5, true)); // kết thúc muộn với tổng 5 -> chỉ in thêm 2
+    assert.deepEqual(counts, [3, 2]);
 });

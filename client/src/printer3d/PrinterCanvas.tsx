@@ -7,6 +7,8 @@ export interface PrinterCanvasHandle {
     printSlot: (entry: SheetEntry, durationSeconds?: number, onComplete?: () => void) => void;
     printSpecial: (entry: SheetEntry, durationSeconds?: number, onComplete?: () => void) => void;
     ejectSheet: (nextSheet: Sheet, onComplete?: () => void) => void;
+    /** Đồng bộ lại hoàn toàn với server (sau khi kết nối lại) */
+    resetSheet: (sheet: Sheet) => void;
     setCameraPreset: (preset: 'stream' | 'closeup' | 'overview') => void;
     setBackground: (presetId: string) => void;
     setBackgroundMode: (mode: 'image' | 'video') => void;
@@ -67,6 +69,9 @@ export const PrinterCanvas = forwardRef<PrinterCanvasHandle, PrinterCanvasProps>
             },
             ejectSheet(nextSheet, onComplete) {
                 sceneRef.current?.startEjectSheetAnimation(nextSheet, onComplete);
+            },
+            resetSheet(sheet) {
+                sceneRef.current?.resetSheet(sheet);
             },
             setCameraPreset(preset) {
                 sceneRef.current?.setCameraPreset(preset);

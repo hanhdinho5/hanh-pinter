@@ -3,7 +3,7 @@ import type { RealtimeEventMap, ViewerEvent, BackgroundConfig, AudioConfig } fro
 
 export type TypedSocket = Socket<RealtimeEventMap>;
 
-const DEFAULT_SERVER_URL =
+export const DEFAULT_SERVER_URL =
     (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_SERVER_URL ??
     (typeof window !== 'undefined'
         ? `${window.location.protocol}//${window.location.hostname}:3001`
@@ -25,14 +25,26 @@ export function getSocket(serverUrl = DEFAULT_SERVER_URL): TypedSocket {
     return sharedSocket;
 }
 
+/** Đọc JSON; server báo lỗi ({ error }) hoặc mất kết nối thì ném Error có thông điệp tiếng Việt */
+async function parse(res: Response): Promise<any> { // eslint-disable-line @typescript-eslint/no-explicit-any
+    let body: { error?: string } | null = null;
+    try {
+        body = await res.json();
+    } catch {
+        // không phải JSON
+    }
+    if (!res.ok) throw new Error(body?.error ?? `Lỗi server (${res.status})`);
+    return body;
+}
+
 export const api = {
     async pause(serverUrl = DEFAULT_SERVER_URL) {
         const res = await fetch(`${serverUrl}/api/printer/pause`, { method: 'POST' });
-        return res.json();
+        return parse(res);
     },
     async resume(serverUrl = DEFAULT_SERVER_URL) {
         const res = await fetch(`${serverUrl}/api/printer/resume`, { method: 'POST' });
-        return res.json();
+        return parse(res);
     },
     async setSpeed(speed: number, serverUrl = DEFAULT_SERVER_URL) {
         const res = await fetch(`${serverUrl}/api/printer/speed`, {
@@ -40,7 +52,7 @@ export const api = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ speed }),
         });
-        return res.json();
+        return parse(res);
     },
     async sendMockComment(username: string, serverUrl = DEFAULT_SERVER_URL) {
         const res = await fetch(`${serverUrl}/api/dev/events/comment`, {
@@ -51,7 +63,7 @@ export const api = {
                 username,
             }),
         });
-        return res.json();
+        return parse(res);
     },
     async sendMockFollow(username: string, serverUrl = DEFAULT_SERVER_URL) {
         const res = await fetch(`${serverUrl}/api/dev/events/follow`, {
@@ -62,7 +74,7 @@ export const api = {
                 username,
             }),
         });
-        return res.json();
+        return parse(res);
     },
     async sendMockGift(
         username: string,
@@ -82,15 +94,15 @@ export const api = {
                 diamondCount,
             }),
         });
-        return res.json();
+        return parse(res);
     },
     async getQueue(serverUrl = DEFAULT_SERVER_URL) {
         const res = await fetch(`${serverUrl}/api/queue`);
-        return res.json();
+        return parse(res);
     },
     async getPrinterState(serverUrl = DEFAULT_SERVER_URL) {
         const res = await fetch(`${serverUrl}/api/printer/state`);
-        return res.json();
+        return parse(res);
     },
     async connectTikTok(username: string, serverUrl = DEFAULT_SERVER_URL) {
         const res = await fetch(`${serverUrl}/api/tiktok/connect`, {
@@ -98,17 +110,17 @@ export const api = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username }),
         });
-        return res.json();
+        return parse(res);
     },
     async disconnectTikTok(serverUrl = DEFAULT_SERVER_URL) {
         const res = await fetch(`${serverUrl}/api/tiktok/disconnect`, {
             method: 'POST',
         });
-        return res.json();
+        return parse(res);
     },
     async getGiftConfig(serverUrl = DEFAULT_SERVER_URL) {
         const res = await fetch(`${serverUrl}/api/config/gift`);
-        return res.json() as Promise<{ goldDiamonds: number; fullPageDiamonds: number }>;
+        return parse(res) as Promise<{ goldDiamonds: number; fullPageDiamonds: number }>;
     },
     async setGiftConfig(goldDiamonds: number, fullPageDiamonds: number, serverUrl = DEFAULT_SERVER_URL) {
         const res = await fetch(`${serverUrl}/api/config/gift`, {
@@ -122,11 +134,11 @@ export const api = {
     },
     async getTikTokStatus(serverUrl = DEFAULT_SERVER_URL) {
         const res = await fetch(`${serverUrl}/api/tiktok/status`);
-        return res.json();
+        return parse(res);
     },
     async getBackgroundConfig(serverUrl = DEFAULT_SERVER_URL) {
         const res = await fetch(`${serverUrl}/api/config/background`);
-        return res.json() as Promise<BackgroundConfig>;
+        return parse(res) as Promise<BackgroundConfig>;
     },
     async setBackgroundConfig(patch: Partial<BackgroundConfig>, serverUrl = DEFAULT_SERVER_URL) {
         const res = await fetch(`${serverUrl}/api/config/background`, {
@@ -140,7 +152,11 @@ export const api = {
     },
     async getAudioConfig(serverUrl = DEFAULT_SERVER_URL) {
         const res = await fetch(`${serverUrl}/api/config/audio`);
-        return res.json() as Promise<AudioConfig>;
+        return parse(res) as Promise<AudioConfig>;
+    },
+    async nextBgmTrack(serverUrl = DEFAULT_SERVER_URL) {
+        const res = await fetch(`${serverUrl}/api/audio/next`, { method: 'POST' });
+        if (!res.ok) throw new Error('Lỗi chuyển bài');
     },
     async setAudioConfig(patch: Partial<AudioConfig>, serverUrl = DEFAULT_SERVER_URL) {
         const res = await fetch(`${serverUrl}/api/config/audio`, {

@@ -78,10 +78,16 @@ export class PrinterWorkshopScene {
     private isEjecting = false;
     private ejectProgress = 0.0;
     private ejectDuration = 1.4; // giây
-    private nextSheetData: Sheet | null = null;
+    /** Tờ đang được kéo lộ ra (tờ kế tiếp) */
+    private ejectTarget: Sheet | null = null;
     private onEjectCompleteCallback: (() => void) | null = null;
-    /** Lệnh đổi tờ đến lúc bút còn đang vẽ: vẽ xong mới kéo tờ đi */
-    private pendingEject: { nextSheet: Sheet; onComplete?: () => void } | null = null;
+    /**
+     * Các lệnh đổi tờ đang chờ (có thể nhiều tờ nếu overlay tụt sau server), mỗi lệnh gắn với id tờ vừa xong.
+     * Vẽ hết hình của tờ hiện tại rồi mới kéo; kéo lần lượt từng tờ.
+     */
+    private pendingEjects: { completedId: number; onComplete?: () => void }[] = [];
+    /** Dữ liệu mới nhất server gửi cho các tờ phía sau tờ đang hiển thị */
+    private futureSheets = new Map<number, Sheet>();
     /**
      * Hàng đợi in: lệnh in mới không bao giờ ghi đè hình đang vẽ dở. Chờ vẽ xong / kéo tờ xong rồi vẽ tiếp,
      * hình nào phải chờ thì vẽ nhanh hơn để bắt kịp nhịp server.
@@ -108,10 +114,9 @@ export class PrinterWorkshopScene {
             alpha: true,
         });
         this.renderer.setClearColor(0x000000, 0);
-        // Render dày gấp 2 rồi trình duyệt thu nhỏ (supersampling) -> mép khung, chữ, avatar sắc nét
-        // kể cả khi OBS / TikTok LIVE Studio mở trang ở tỉ lệ 1:1. Có thể giảm bằng ?quality=1
+        // Mặc định theo màn hình (nhẹ máy khi vừa live vừa mã hoá stream). Muốn nét hơn: thêm ?quality=2
         const q = Number(new URLSearchParams(window.location.search).get('quality'));
-        this.renderer.setPixelRatio(q > 0 ? Math.min(q, 3) : Math.max(2, Math.min(window.devicePixelRatio, 3)));
+        this.renderer.setPixelRatio(q > 0 ? Math.min(q, 3) : Math.min(window.devicePixelRatio || 1, 2));
         this.renderer.setSize(Math.max(1, container.clientWidth), Math.max(1, container.clientHeight), false);
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -444,23 +449,73 @@ export class PrinterWorkshopScene {
     }
 
     public updateSheet(sheet: Sheet): void {
-        // Đang kéo tờ cũ đi: dữ liệu tờ mới hiện ngay lên tờ bên dưới
-        if (this.isEjecting || this.pendingEject) {
-            if (this.currentSheet && sheet.id === this.currentSheet.id) {
-                // cập nhật cuối của tờ cũ: chỉ lưu khi chưa bắt đầu kéo
-                if (!this.isEjecting) this.currentSheet = this.withActiveEntry(sheet);
-                return;
-            }
-            this.nextSheetData = sheet;
-            this.underRenderer.renderSheet(this.visible(sheet));
+        const cur = this.currentSheet;
+        if (!cur) {
+            this.resetSheet(sheet);
             return;
         }
-        const idChanged = !this.currentSheet || this.currentSheet.id !== sheet.id;
+        // Tờ phía sau (overlay đang vẽ nốt / đang kéo tờ trước): nhớ lại, hiện ngay lên tờ bên dưới nếu là tờ kế
+        if (sheet.id > cur.id) {
+            const idle = !this.isPrintingActive && !this.isEjecting && this.printQueue.length === 0 && this.pendingEjects.length === 0;
+            if (idle) {
+                // Không có gì đang chờ mà tờ đã nhảy sang id khác -> lệch nhịp, đồng bộ lại luôn
+                this.resetSheet(sheet);
+                return;
+            }
+            this.futureSheets.set(sheet.id, sheet);
+            if (sheet.id === this.underSheetId()) this.underRenderer.renderSheet(this.visible(sheet));
+            return;
+        }
+        if (sheet.id < cur.id) return; // bản cập nhật cũ đến muộn
+        // Cùng tờ: đang kéo đi thì không vẽ lại nữa
+        if (this.isEjecting) return;
         this.currentSheet = this.withActiveEntry(sheet);
-        if (idChanged) this.renderUnderSheet(sheet.id + 1);
         if (!this.isPrintingActive) {
             this.sheetRenderer.renderSheet(this.visible(this.currentSheet));
         }
+    }
+
+    /** Id của tờ đang nằm bên dưới (tờ sẽ lộ ra khi kéo) */
+    private underSheetId(): number {
+        return (this.currentSheet?.id ?? 0) + 1;
+    }
+
+    private renderUnder(): void {
+        const id = this.underSheetId();
+        const data = this.futureSheets.get(id);
+        if (data) this.underRenderer.renderSheet(this.visible(data));
+        else this.renderUnderSheet(id);
+    }
+
+    /**
+     * Đặt lại hoàn toàn (lần đầu, hoặc server vừa khởi động lại và đếm tờ lại từ đầu):
+     * bỏ mọi hình đang chờ / đang vẽ / đang kéo, hiển thị đúng tờ server gửi, không ghép avatar cũ.
+     */
+    public resetSheet(sheet: Sheet): void {
+        const queued = this.printQueue.splice(0);
+        const ejects = this.pendingEjects.splice(0);
+        const printCb = this.onPrintCompleteCallback;
+        const ejectCb = this.onEjectCompleteCallback;
+        this.onPrintCompleteCallback = null;
+        this.onEjectCompleteCallback = null;
+        if (this.isPrintingActive) soundManager.stopPrintSound();
+        this.isPrintingActive = false;
+        this.activeSlot = null;
+        this.activeEntry = null;
+        this.isEjecting = false;
+        this.ejectTarget = null;
+        this.futureSheets.clear();
+        this.paperMesh.position.set(0, 0, 0.85);
+        this.setPrinterStatus('idle');
+
+        this.currentSheet = sheet;
+        this.sheetRenderer.renderSheet(sheet);
+        this.renderUnderSheet(sheet.id + 1);
+
+        printCb?.();
+        ejectCb?.();
+        for (const q of queued) q.onComplete?.();
+        for (const e of ejects) e.onComplete?.();
     }
 
     /**
@@ -584,20 +639,41 @@ export class PrinterWorkshopScene {
      */
     private advance(): void {
         if (this.isPrintingActive || this.isEjecting) return;
+        const curId = this.currentSheet?.id;
+        // Bỏ lệnh kéo của các tờ đã qua
+        while (this.pendingEjects.length > 0 && curId !== undefined && this.pendingEjects[0].completedId < curId) {
+            this.pendingEjects.shift()?.onComplete?.();
+        }
         const next = this.printQueue[0];
-        if (this.pendingEject) {
-            const forCurrentSheet = next?.entry.sheetId != null && next.entry.sheetId === this.currentSheet?.id;
-            if (!forCurrentSheet) {
-                const ej = this.pendingEject;
-                this.pendingEject = null;
-                this.beginEject(ej.nextSheet, ej.onComplete);
+        const nextSheetId = next?.entry.sheetId;
+        if (curId !== undefined) {
+            const forCurrentSheet = nextSheetId != null && nextSheetId === curId;
+            // Cần kéo tờ khi: server đã báo tờ này xong, hoặc hình kế tiếp thuộc tờ sau (lỡ mất lệnh kéo)
+            const needEject = this.pendingEjects.length > 0 || (nextSheetId != null && nextSheetId > curId);
+            if (needEject && !forCurrentSheet) {
+                const ej = this.pendingEjects[0]?.completedId === curId ? this.pendingEjects.shift() : undefined;
+                this.beginEject(ej?.onComplete);
                 return;
             }
         }
         if (!next) return;
         this.printQueue.shift();
-        // Hình phải chờ lâu thì vẽ nhanh hơn để bắt kịp nhịp server
-        const duration = Math.max(0.8, next.duration - next.waited);
+        if (nextSheetId != null && curId !== undefined && nextSheetId < curId) {
+            // Hình của tờ đã kéo đi (rất hiếm): bỏ qua, không vẽ nhầm lên tờ mới
+            next.onComplete?.();
+            this.advance();
+            return;
+        }
+        this.startQueued(next);
+    }
+
+    private startQueued(next: { special: boolean; entry: SheetEntry; duration: number; onComplete?: () => void; waited: number }): void {
+        // Hình phải chờ lâu thì vẽ nhanh hơn để bắt kịp nhịp server; tồn nhiều thì vẽ rất nhanh
+        const backlog = this.printQueue.length;
+        let duration = Math.max(0.8, next.duration - next.waited);
+        if (backlog >= 8) duration = 0.35;
+        else if (backlog >= 4) duration = Math.min(duration, 0.7);
+        this.ejectDuration = backlog >= 4 ? 0.7 : 1.4;
         if (next.special) this.beginPrintSpecial(next.entry, duration, next.onComplete);
         else this.beginPrintSlot(next.entry, duration, next.onComplete);
     }
@@ -613,17 +689,20 @@ export class PrinterWorkshopScene {
      * Kích hoạt hoạt ảnh cuộn tờ giấy cũ ra ngoài và nạp tờ mới vào
      */
     public startEjectSheetAnimation(nextSheet: Sheet, onComplete?: () => void): void {
-        this.pendingEject = { nextSheet, onComplete };
+        // nextSheet.id = id tờ vừa xong + 1
+        this.pendingEjects.push({ completedId: nextSheet.id - 1, onComplete });
+        if (!this.futureSheets.has(nextSheet.id)) this.futureSheets.set(nextSheet.id, nextSheet);
         this.advance();
     }
 
-    private beginEject(nextSheet: Sheet, onComplete?: () => void): void {
+    private beginEject(onComplete?: () => void): void {
         this.isEjecting = true;
         this.ejectProgress = 0.0;
+        const id = this.underSheetId();
         // Tờ mới thật từ server có thể đã đến trước (lúc chờ bút vẽ xong) -> ưu tiên dùng
-        this.nextSheetData = this.nextSheetData ?? nextSheet;
+        this.ejectTarget = this.futureSheets.get(id) ?? { id, kind: 'standard', capacity: 4, entries: [], completed: false };
         this.onEjectCompleteCallback = onComplete ?? null;
-        this.underRenderer.renderSheet(this.visible(this.nextSheetData));
+        this.underRenderer.renderSheet(this.visible(this.ejectTarget));
 
         // Âm thanh cuộn giấy xoẹt qua
         soundManager.playPaperRoll();
@@ -720,7 +799,7 @@ export class PrinterWorkshopScene {
 
         // Vẽ lại canvas texture với tiến trình cắt dòng (tối đa 30 lần/giây: mỗi lần phải tải cả tờ lên GPU)
         this.printRedrawTimer += delta;
-        if (this.printRedrawTimer >= 1 / 30 || this.printProgress >= 1) {
+        if (this.printRedrawTimer >= 1 / 24 || this.printProgress >= 1) {
             this.printRedrawTimer = 0;
             this.sheetRenderer.renderSheetProgress(
                 this.visible(this.currentSheet),
@@ -807,14 +886,17 @@ export class PrinterWorkshopScene {
         this.paperMesh.position.y = 0.004 + Math.sin(t * Math.PI) * 0.03;
 
         if (t >= 1) {
-            const next = this.nextSheetData;
-            if (next) {
+            const target = this.ejectTarget;
+            if (target) {
+                // Dữ liệu mới nhất của tờ này có thể vừa đến trong lúc kéo
+                const next = this.futureSheets.get(target.id) ?? target;
                 this.currentSheet = next;
+                for (const id of [...this.futureSheets.keys()]) if (id <= next.id) this.futureSheets.delete(id);
                 // Tờ trên nhận nội dung tờ dưới rồi về chỗ cũ (giống hệt nên không thấy chuyển cảnh)
                 this.sheetRenderer.renderSheet(this.visible(next));
-                this.renderUnderSheet(next.id + 1);
+                this.renderUnder();
             }
-            this.nextSheetData = null;
+            this.ejectTarget = null;
             this.isEjecting = false;
             this.paperMesh.position.set(0, 0, 0.85);
 
@@ -835,10 +917,12 @@ export class PrinterWorkshopScene {
 
             this.timer.update();
             // Giới hạn delta: khi tab/OBS bị ẩn rồi hiện lại không bị "nhảy cóc" hoạt ảnh
-            const delta = Math.min(this.timer.getDelta(), 0.1);
+            const rawDelta = this.timer.getDelta();
+            const delta = Math.min(rawDelta, 0.1);
             const time = this.timer.getElapsed();
 
-            for (const q of this.printQueue) q.waited += delta;
+            // Thời gian chờ tính theo đồng hồ thật (kể cả khi khung hình bị chậm) để bắt kịp server
+            for (const q of this.printQueue) q.waited += Math.min(rawDelta, 5);
 
             // 1. Cập nhật hoạt ảnh in avatar
             if (this.isPrintingActive) {

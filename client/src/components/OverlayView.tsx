@@ -8,6 +8,8 @@ import type { Sheet, SheetEntry, PrintJob } from '../types';
 
 export function OverlayView() {
     const printerRef = useRef<PrinterCanvasHandle | null>(null);
+    /** true = tờ giấy kế tiếp server gửi sẽ đặt lại toàn bộ cảnh in */
+    const resyncRef = useRef(true);
 
     const [activeSheet, setActiveSheet] = useState<Sheet>({
         id: 1,
@@ -21,11 +23,12 @@ export function OverlayView() {
     const [bgMode, setBgMode] = useState<'image' | 'video'>('image');
     const [currentVideoId, setCurrentVideoId] = useState('vd1');
 
-    // Xử lý tham số URL: ?bgm=1 (tự bật BGM), ?mute=1 (tắt âm), ?vol=50
+    // Tham số URL (ưu tiên hơn cài đặt trong Admin): ?bgm=1|0, ?mute=1, ?sfxVol=0.8, ?bgmVol=0.5
+    const urlAudio = useRef(new URLSearchParams(window.location.search));
     useEffect(() => {
-        const params = new URLSearchParams(window.location.search);
+        const params = urlAudio.current;
         if (params.get('mute') === '1' || params.get('muted') === '1') {
-            soundManager.toggleMute();
+            soundManager.setMuted(true);
         }
         if (params.has('sfxVol')) {
             soundManager.setSfxVolume(Number(params.get('sfxVol')));
@@ -49,6 +52,23 @@ export function OverlayView() {
     }, []);
 
     const { isConnected, currentSheet, status, backgroundConfig } = usePrinterSocket({
+        onConnect: () => {
+            resyncRef.current = true;
+        },
+        onAudioNext: () => {
+            if (soundManager.isBgmWanted()) soundManager.nextTrack();
+        },
+        // Nhạc nền / tắt tiếng / âm lượng điều khiển từ trang Admin
+        onAudioSync: (cfg) => {
+            const params = urlAudio.current;
+            if (params.has('sfxVol')) soundManager.setSfxVolume(Number(params.get('sfxVol')));
+            if (params.has('bgmVol')) soundManager.setBgmVolume(Number(params.get('bgmVol')));
+            if (!params.has('mute') && !params.has('muted')) soundManager.setMuted(cfg.muted);
+            if (!params.has('bgm')) {
+                if (cfg.bgmEnabled) soundManager.startBgm();
+                else soundManager.stopBgm();
+            }
+        },
         onJobStarted: (job: PrintJob, durationSeconds: number) => {
             isPrintingRef.current = true;
 
@@ -91,6 +111,11 @@ export function OverlayView() {
         onSheetUpdate: (sheet: Sheet) => {
             // Nếu không đang trong hoạt ảnh quét in thì đồng bộ dữ liệu tĩnh
             // Scene tự giữ avatar đang/vừa in, nên luôn nhận dữ liệu mới (trước đây bỏ qua khi đang in -> hình trước bị mất)
+            if (resyncRef.current) {
+                // Lần đầu / vừa kết nối lại (server có thể đã khởi động lại): đặt lại tờ, không ghép avatar cũ
+                resyncRef.current = false;
+                printerRef.current?.resetSheet(sheet);
+            }
             setActiveSheet(sheet);
         },
         onBackgroundSync: (config) => {
@@ -98,9 +123,31 @@ export function OverlayView() {
                 printerRef.current.setBackground(config.presetId);
                 printerRef.current.setAutoRotate(config.autoRotate, config.intervalMinutes);
                 printerRef.current.setCreaturesVisible(config.showButterflies, config.showBirds);
+                // Chế độ nền đã lưu (ảnh động / video) -> giữ nguyên kể cả khi LIVE Studio tải lại trang
+                if (config.videoId && config.videoId !== 'custom') {
+                    printerRef.current.setBackgroundVideo(config.videoId);
+                    setCurrentVideoId(config.videoId);
+                }
+                if (config.mode) {
+                    printerRef.current.setBackgroundMode(config.mode);
+                    setBgMode(config.mode);
+                }
             }
         },
     });
+
+    // Áp lại chế độ nền đã lưu sau khi cảnh 3D sẵn sàng (phòng khi tín hiệu đồng bộ đến trước lúc cảnh khởi tạo)
+    useEffect(() => {
+        if (!backgroundConfig || !printerRef.current) return;
+        if (backgroundConfig.videoId && backgroundConfig.videoId !== 'custom') {
+            printerRef.current.setBackgroundVideo(backgroundConfig.videoId);
+            setCurrentVideoId(backgroundConfig.videoId);
+        }
+        if (backgroundConfig.mode) {
+            printerRef.current.setBackgroundMode(backgroundConfig.mode);
+            setBgMode(backgroundConfig.mode);
+        }
+    }, [backgroundConfig]);
 
     // Đồng bộ ban đầu khi nhận được snapshot từ backend
     useEffect(() => {
@@ -118,9 +165,22 @@ export function OverlayView() {
                 top: 0,
                 left: 0,
                 overflow: 'hidden',
-                backgroundColor: '#0e0a07',
+                backgroundColor: '#000000',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
             }}
         >
+          {/* Khung 9:16 cố định ở giữa: cửa sổ 1080x1920 thì lấp kín, cửa sổ khác tỉ lệ thì có viền đen */}
+          <div
+            style={{
+                position: 'relative',
+                width: 'min(100vw, calc(100vh * 9 / 16))',
+                height: 'min(100vh, calc(100vw * 16 / 9))',
+                overflow: 'hidden',
+                backgroundColor: '#0e0a07',
+            }}
+          >
             <PrinterCanvas
                 ref={printerRef}
                 sheet={activeSheet}
@@ -142,6 +202,7 @@ export function OverlayView() {
                 onToggleBgMode={(mode) => {
                     setBgMode(mode);
                     printerRef.current?.setBackgroundMode(mode);
+                    api.setBackgroundConfig({ mode }).catch(() => undefined);
                 }}
                 currentVideoId={currentVideoId}
                 onSelectVideo={(videoId) => {
@@ -149,6 +210,7 @@ export function OverlayView() {
                     printerRef.current?.setBackgroundVideo(videoId);
                     printerRef.current?.setBackgroundMode('video');
                     setBgMode('video');
+                    api.setBackgroundConfig({ mode: 'video', videoId }).catch(() => undefined);
                 }}
                 onUploadCustomVideo={(file) => {
                     printerRef.current?.applyCustomVideo(file);
@@ -158,7 +220,7 @@ export function OverlayView() {
                     printerRef.current?.setBackground(presetId);
                     printerRef.current?.setBackgroundMode('image');
                     setBgMode('image');
-                    void api.setBackgroundConfig({ presetId });
+                    api.setBackgroundConfig({ presetId, mode: 'image' }).catch(() => undefined);
                 }}
                 onUploadCustomImage={(dataUrl) => {
                     printerRef.current?.applyCustomBackground(dataUrl);
@@ -168,17 +230,17 @@ export function OverlayView() {
                 autoRotate={backgroundConfig?.autoRotate ?? false}
                 onToggleAutoRotate={(enabled) => {
                     printerRef.current?.setAutoRotate(enabled, 5);
-                    void api.setBackgroundConfig({ autoRotate: enabled });
+                    api.setBackgroundConfig({ autoRotate: enabled }).catch(() => undefined);
                 }}
                 showButterflies={backgroundConfig?.showButterflies ?? true}
                 onToggleButterflies={(enabled) => {
                     printerRef.current?.setCreaturesVisible(enabled, backgroundConfig?.showBirds ?? true);
-                    void api.setBackgroundConfig({ showButterflies: enabled });
+                    api.setBackgroundConfig({ showButterflies: enabled }).catch(() => undefined);
                 }}
                 showBirds={backgroundConfig?.showBirds ?? true}
                 onToggleBirds={(enabled) => {
                     printerRef.current?.setCreaturesVisible(backgroundConfig?.showButterflies ?? true, enabled);
-                    void api.setBackgroundConfig({ showBirds: enabled });
+                    api.setBackgroundConfig({ showBirds: enabled }).catch(() => undefined);
                 }}
                 onTriggerBirds={() => {
                     printerRef.current?.triggerBirdFlock();
@@ -205,6 +267,7 @@ export function OverlayView() {
                     ⚠️ MẤT KẾT NỐI SERVER (:3001)
                 </div>
             )}
+          </div>
         </div>
     );
 }

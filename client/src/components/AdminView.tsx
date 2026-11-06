@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api } from '../socket/socketClient';
+import { api, DEFAULT_SERVER_URL } from '../socket/socketClient';
 import { usePrinterSocket } from '../socket/usePrinterSocket';
 import { soundManager } from '../audio/SoundManager';
 import { BACKGROUND_PRESETS } from '../printer3d/backgroundManager';
@@ -40,17 +40,39 @@ const btn = (bg = '#2563eb'): React.CSSProperties => ({
     cursor: 'pointer',
 });
 
-const sim = (body: Record<string, unknown>) =>
-    fetch(`${window.location.protocol}//${window.location.hostname}:3001/api/dev/tiktok/simulate`, {
+const sim = async (body: Record<string, unknown>) => {
+    const res = await fetch(`${DEFAULT_SERVER_URL}/api/dev/tiktok/simulate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
     });
+    if (!res.ok) {
+        const b = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(b?.error ?? `Lỗi server (${res.status})`);
+    }
+};
 const rid = () => `viewer${Math.floor(Math.random() * 9999)}`;
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export function AdminView() {
-    const { isConnected, printerState, queueState, tiktokStatus, recentEvents } = usePrinterSocket();
+    const { isConnected, printerState, queueState, tiktokStatus, recentEvents, backgroundConfig } = usePrinterSocket({
+        // Âm thanh đổi ở nơi khác (tab Admin khác / dashboard) -> hiển thị đúng
+        onAudioSync: (a) => {
+            setBgmPlaying(a.bgmEnabled);
+            setMuted(a.muted);
+            setSfxVol(Math.round(a.sfxVolume * 100));
+            setBgmVol(Math.round(a.bgmVolume * 100));
+            setLoaded((l) => ({ ...l, audio: true }));
+        },
+    });
+    /** Đã tải cài đặt thật từ server chưa: chưa tải thì khoá nút Lưu để không ghi đè bằng giá trị mặc định */
+    const [loaded, setLoaded] = useState({ gift: false, audio: false, bg: false });
+    const [loadError, setLoadError] = useState('');
+    /** Thông báo lỗi chung cho các nút thao tác */
+    const [actionMsg, setActionMsg] = useState('');
+    const run = (p: Promise<unknown>, okMsg = '') => {
+        p.then(() => setActionMsg(okMsg)).catch((e: unknown) => setActionMsg(`⚠️ ${e instanceof Error ? e.message : 'Lỗi'}`));
+    };
     const [username, setUsername] = useState('');
     const [msg, setMsg] = useState('');
     const [gold, setGold] = useState(100);
@@ -71,18 +93,28 @@ export function AdminView() {
     const [showBirds, setShowBirds] = useState(true);
     const [bgMsg, setBgMsg] = useState('');
 
+    // Tải cài đặt từ server: lúc mở trang và MỖI LẦN kết nối lại (server vừa khởi động lại)
     useEffect(() => {
+        if (!isConnected) return;
+        const fail = (e: unknown) =>
+            setLoadError(`Chưa tải được cài đặt từ server (${e instanceof Error ? e.message : 'lỗi'}). Đang thử lại khi kết nối lại…`);
+        setLoadError('');
+
         api.getGiftConfig().then((c) => {
             setGold(c.goldDiamonds);
             setFull(c.fullPageDiamonds);
-        }).catch(() => undefined);
+            setLoaded((l) => ({ ...l, gift: true }));
+        }).catch(fail);
 
         api.getAudioConfig().then((a) => {
             soundManager.setSfxVolume(a.sfxVolume);
             soundManager.setBgmVolume(a.bgmVolume);
+            setBgmPlaying(a.bgmEnabled);
+            setMuted(a.muted);
             setSfxVol(Math.round(a.sfxVolume * 100));
             setBgmVol(Math.round(a.bgmVolume * 100));
-        }).catch(() => undefined);
+            setLoaded((l) => ({ ...l, audio: true }));
+        }).catch(fail);
 
         api.getBackgroundConfig().then((cfg) => {
             setBgPreset(cfg.presetId);
@@ -90,23 +122,40 @@ export function AdminView() {
             setRotateInterval(cfg.intervalMinutes);
             setShowButterflies(cfg.showButterflies);
             setShowBirds(cfg.showBirds);
-        }).catch(() => undefined);
-    }, []);
+            setLoaded((l) => ({ ...l, bg: true }));
+        }).catch(fail);
+    }, [isConnected]);
+
+    // Cảnh nền đổi từ overlay / dashboard -> cập nhật form
+    useEffect(() => {
+        if (!backgroundConfig) return;
+        setBgPreset(backgroundConfig.presetId);
+        setAutoRotate(backgroundConfig.autoRotate);
+        setRotateInterval(backgroundConfig.intervalMinutes);
+        setShowButterflies(backgroundConfig.showButterflies);
+        setShowBirds(backgroundConfig.showBirds);
+        setLoaded((l) => ({ ...l, bg: true }));
+    }, [backgroundConfig]);
 
     // Lưu âm lượng lên server (debounce) -> đồng bộ tới overlay OBS / TikTok LIVE Studio
     const audioSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingAudio = useRef<{ sfxVolume?: number; bgmVolume?: number }>({});
     const saveAudio = (patch: { sfxVolume?: number; bgmVolume?: number }) => {
+        if (!loaded.audio) return; // chưa tải âm lượng thật từ server -> không ghi đè
         pendingAudio.current = { ...pendingAudio.current, ...patch };
         if (audioSaveTimer.current) clearTimeout(audioSaveTimer.current);
         audioSaveTimer.current = setTimeout(() => {
             const body = pendingAudio.current;
             pendingAudio.current = {};
-            api.setAudioConfig(body).catch(() => undefined);
+            api.setAudioConfig(body).catch((e: unknown) => setActionMsg(`⚠️ Không lưu được âm lượng: ${e instanceof Error ? e.message : 'lỗi'}`));
         }, 250);
     };
 
     const updateBgConfig = async (patch: Partial<BackgroundConfig>) => {
+        if (!loaded.bg) {
+            setBgMsg('Chưa tải được cài đặt từ server, thử lại sau');
+            return;
+        }
         try {
             const res = await api.setBackgroundConfig(patch);
             setBgPreset(res.presetId);
@@ -135,10 +184,22 @@ export function AdminView() {
 
     const connect = async () => {
         setMsg('Đang kết nối…');
-        const r = await api.connectTikTok(username.trim());
-        setMsg(r.message ?? '');
+        try {
+            const r = await api.connectTikTok(username.trim());
+            setMsg(r?.success === false ? `⚠️ ${r.message ?? 'Không kết nối được'}` : (r?.message ?? 'Đã gửi yêu cầu kết nối'));
+        } catch (e) {
+            setMsg(`⚠️ ${e instanceof Error ? e.message : 'Không gọi được server'}`);
+        }
     };
     const saveGift = async () => {
+        if (!loaded.gift) {
+            setGiftMsg('Chưa tải được cài đặt từ server, thử lại sau');
+            return;
+        }
+        if (!(gold >= 1 && full > gold)) {
+            setGiftMsg('Ngưỡng VIP phải lớn hơn ngưỡng khung vàng');
+            return;
+        }
         try {
             await api.setGiftConfig(gold, full);
             setGiftMsg('Đã lưu ✔');
@@ -156,6 +217,14 @@ export function AdminView() {
                         {isConnected ? '● server OK' : '● mất kết nối server'}
                     </span>
                 </h1>
+                {(loadError || actionMsg) && (
+                    <div style={{ gridColumn: '1 / -1', padding: '8px 12px', borderRadius: 8, background: '#3f1d1d', color: '#fecaca', fontSize: 13, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                        <span>{loadError || actionMsg}</span>
+                        {actionMsg && !loadError && (
+                            <button style={{ ...btn('#7f1d1d'), padding: '2px 8px' }} onClick={() => setActionMsg('')}>✕</button>
+                        )}
+                    </div>
+                )}
 
                 <section style={card}>
                     <h2 style={{ margin: 0, fontSize: 16 }}>TikTok LIVE</h2>
@@ -168,7 +237,9 @@ export function AdminView() {
                     <div style={{ display: 'flex', gap: 8 }}>
                         <input style={{ ...input, flex: 1 }} placeholder="username TikTok (không cần @)" value={username} onChange={(e) => setUsername(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && username.trim() && void connect()} />
                         <button style={btn('#10b981')} disabled={!username.trim()} onClick={() => void connect()}>Kết nối</button>
-                        <button style={btn('#ef4444')} onClick={() => void api.disconnectTikTok().then(() => setMsg(''))}>Ngắt</button>
+                        <button style={btn('#ef4444')} onClick={() => {
+                            api.disconnectTikTok().then(() => setMsg('Đã ngắt kết nối')).catch((e: unknown) => setMsg(`⚠️ ${e instanceof Error ? e.message : 'Lỗi'}`));
+                        }}>Ngắt</button>
                     </div>
                     {msg && <div style={{ fontSize: 13, color: '#94a3b8' }}>{msg}</div>}
                     <div style={{ fontSize: 12, color: '#64748b' }}>Tài khoản phải đang LIVE. Server tự nhớ username và tự nối lại khi rớt mạng hoặc bật lại.</div>
@@ -179,7 +250,7 @@ export function AdminView() {
                     <div>Trạng thái: <b>{printerState?.status ?? '—'}</b> · Tờ đã in: <b>{printerState?.sheetsCompleted ?? 0}</b></div>
                     <div>Hàng đợi: ưu tiên <b>{queueState?.pendingPriority.length ?? 0}</b> · thường <b>{queueState?.pendingFree.length ?? 0}</b></div>
                     <div style={{ display: 'flex', gap: 8 }}>
-                        <button style={btn(paused ? '#10b981' : '#f59e0b')} onClick={() => void (paused ? api.resume() : api.pause())}>
+                        <button style={btn(paused ? '#10b981' : '#f59e0b')} onClick={() => run(paused ? api.resume() : api.pause())}>
                             {paused ? '▶ Tiếp tục' : '⏸ Tạm dừng'}
                         </button>
                     </div>
@@ -187,7 +258,7 @@ export function AdminView() {
                         Tốc độ in: <b>x{speed}</b>
                         <input type="range" min={0.25} max={4} step={0.25} value={speed} style={{ width: '100%' }}
                             onChange={(e) => setSpeed(Number(e.target.value))}
-                            onMouseUp={() => void api.setSpeed(speed)} onTouchEnd={() => void api.setSpeed(speed)} onKeyUp={() => void api.setSpeed(speed)} />
+                            onMouseUp={() => run(api.setSpeed(speed))} onTouchEnd={() => run(api.setSpeed(speed))} onKeyUp={() => run(api.setSpeed(speed))} />
                     </label>
                 </section>
 
@@ -196,7 +267,7 @@ export function AdminView() {
                     <label style={{ fontSize: 13 }}>Khung vàng từ <input style={{ ...input, width: 90 }} type="number" min={1} value={gold} onChange={(e) => setGold(Number(e.target.value))} /></label>
                     <label style={{ fontSize: 13 }}>Khung VIP vương miện từ <input style={{ ...input, width: 90 }} type="number" min={2} value={full} onChange={(e) => setFull(Number(e.target.value))} /></label>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                        <button style={btn()} onClick={() => void saveGift()}>Lưu</button>
+                        <button style={btn()} disabled={!loaded.gift} title={loaded.gift ? '' : 'Đang tải cài đặt từ server…'} onClick={() => void saveGift()}>Lưu</button>
                         <span style={{ fontSize: 13, color: '#94a3b8' }}>{giftMsg}</span>
                     </div>
                     <div style={{ fontSize: 12, color: '#64748b' }}>Tính theo tổng = kim cương × số lượng quà. Áp dụng ngay, được lưu lại.</div>
@@ -207,7 +278,15 @@ export function AdminView() {
                         <h2 style={{ margin: 0, fontSize: 16 }}>Âm thanh & Nhạc nền (BGM)</h2>
                         <button
                             style={btn(muted ? '#ef4444' : '#1e293b')}
-                            onClick={() => setMuted(soundManager.toggleMute())}
+                            title="Tắt / mở toàn bộ âm thanh trên overlay (OBS / TikTok LIVE Studio)"
+                            onClick={() => {
+                                const next = !muted;
+                                setMuted(next);
+                                api.setAudioConfig({ muted: next }).catch((e: unknown) => {
+                                    setMuted(!next);
+                                    setActionMsg(`⚠️ ${e instanceof Error ? e.message : 'Lỗi'}`);
+                                });
+                            }}
                         >
                             {muted ? '🔇 Đang tắt âm' : '🔊 Đang mở âm'}
                         </button>
@@ -215,14 +294,14 @@ export function AdminView() {
                     <div style={{ display: 'flex', gap: 8 }}>
                         <button
                             style={btn(bgmPlaying ? '#0284c7' : '#334155')}
+                            title="Bật / tắt nhạc nền trên overlay (OBS / TikTok LIVE Studio)"
                             onClick={() => {
-                                if (bgmPlaying) {
-                                    soundManager.stopBgm();
-                                    setBgmPlaying(false);
-                                } else {
-                                    soundManager.startBgm();
-                                    setBgmPlaying(true);
-                                }
+                                const next = !bgmPlaying;
+                                setBgmPlaying(next);
+                                api.setAudioConfig({ bgmEnabled: next }).catch((e: unknown) => {
+                                    setBgmPlaying(!next);
+                                    setActionMsg(`⚠️ ${e instanceof Error ? e.message : 'Lỗi'}`);
+                                });
                             }}
                         >
                             {bgmPlaying ? '⏸ Tạm dừng BGM' : '▶ Bật Nhạc BGM'}
@@ -231,8 +310,7 @@ export function AdminView() {
                             style={btn('#475569')}
                             title="Chuyển sang bài nhạc tiếp theo"
                             onClick={() => {
-                                soundManager.nextTrack();
-                                setBgmPlaying(true);
+                                run(api.nextBgmTrack());
                             }}
                         >
                             ⏭️ Bài kế
@@ -301,6 +379,8 @@ export function AdminView() {
                         </button>
                     </div>
                     <div style={{ fontSize: 12, color: '#64748b' }}>
+                        Các nút trên điều khiển âm thanh của trang overlay (OBS / TikTok LIVE Studio), không phát ở trang này. Nút "Thử…" phát ngay tại đây để nghe thử.
+                        <br />
                         Thư mục: <code>client/public/music/</code> (lofi-1.mp3, lofi-2.mp3) và <code>client/public/sounds/</code>
                     </div>
                 </section>
@@ -401,17 +481,17 @@ export function AdminView() {
                     <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>Thử nhanh:</div>
                     <div style={{ fontSize: 12, color: '#64748b' }}>Giả lập TikTok (đi qua adapter thật, không cần live):</div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        <button style={btn('#7c3aed')} onClick={() => void sim({ kind: 'chat', uniqueId: rid() })}>Chat</button>
-                        <button style={btn('#7c3aed')} onClick={() => void sim({ kind: 'follow', uniqueId: rid() })}>Follow</button>
-                        <button style={btn('#7c3aed')} onClick={() => void (async () => { for (let i = 0; i < 10; i++) { await sim({ kind: 'chat', uniqueId: rid() }); await delay(150); } })()}>10 người chat</button>
-                        <button style={btn('#7c3aed')} onClick={() => void sim({ kind: 'gift', uniqueId: rid(), giftName: 'Galaxy', diamondCount: 1000 })}>Quà 1000💎</button>
-                        <button style={btn('#7c3aed')} onClick={() => void (async () => { const u = rid(); for (let n = 20; n <= 100; n += 20) { await sim({ kind: 'gift', uniqueId: u, giftName: 'Rose', diamondCount: 1, streakable: true, repeatCount: n }); await delay(400); } await sim({ kind: 'gift', uniqueId: u, giftName: 'Rose', diamondCount: 1, streakable: true, repeatCount: 100, repeatEnd: true }); })()}>Combo Rose ×100</button>
+                        <button style={btn('#7c3aed')} onClick={() => run(sim({ kind: 'chat', uniqueId: rid() }))}>Chat</button>
+                        <button style={btn('#7c3aed')} onClick={() => run(sim({ kind: 'follow', uniqueId: rid() }))}>Follow</button>
+                        <button style={btn('#7c3aed')} onClick={() => run((async () => { for (let i = 0; i < 10; i++) { await sim({ kind: 'chat', uniqueId: rid() }); await delay(150); } })())}>10 người chat</button>
+                        <button style={btn('#7c3aed')} onClick={() => run(sim({ kind: 'gift', uniqueId: rid(), giftName: 'Galaxy', diamondCount: 1000 }))}>Quà 1000💎</button>
+                        <button style={btn('#7c3aed')} onClick={() => run((async () => { const u = rid(); for (let n = 20; n <= 100; n += 20) { await sim({ kind: 'gift', uniqueId: u, giftName: 'Rose', diamondCount: 1, streakable: true, repeatCount: n }); await delay(400); } await sim({ kind: 'gift', uniqueId: u, giftName: 'Rose', diamondCount: 1, streakable: true, repeatCount: 100, repeatEnd: true }); })())}>Combo Rose ×100</button>
                     </div>
                     <div style={{ fontSize: 12, color: '#64748b' }}>Thử nhanh (bỏ qua adapter):</div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        <button style={btn('#334155')} onClick={() => void api.sendMockComment(`test${Math.floor(Math.random() * 999)}`)}>Comment</button>
-                        <button style={btn('#334155')} onClick={() => void api.sendMockGift(`vip${Math.floor(Math.random() * 999)}`, 'Rose', gold)}>Quà vàng</button>
-                        <button style={btn('#334155')} onClick={() => void api.sendMockGift(`vip${Math.floor(Math.random() * 999)}`, 'Lion', full)}>Quà VIP vương miện</button>
+                        <button style={btn('#334155')} onClick={() => run(api.sendMockComment(`test${Math.floor(Math.random() * 999)}`))}>Comment</button>
+                        <button style={btn('#334155')} onClick={() => run(api.sendMockGift(`vip${Math.floor(Math.random() * 999)}`, 'Rose', gold))}>Quà vàng</button>
+                        <button style={btn('#334155')} onClick={() => run(api.sendMockGift(`vip${Math.floor(Math.random() * 999)}`, 'Lion', full))}>Quà VIP vương miện</button>
                     </div>
                 </section>
 

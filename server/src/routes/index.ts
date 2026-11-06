@@ -55,7 +55,10 @@ const parseEvent = (raw: unknown, type: NewEventInput['type']): NewEventInput =>
 };
 
 const AVATAR_HOSTS = /(^|\.)(tiktokcdn[a-z-]*\.com|tiktokv\.com|ibyteimg\.com|byteimg\.com|byteoversea\.com|muscdn\.com|tiktokcdn\.us)$/i;
-const avatarCache = new Map<string, { type: string; body: Buffer }>();
+/** Avatar chỉ giữ tạm trong RAM vài phút (đủ cho lúc vẽ), không ghi ra ổ đĩa */
+const AVATAR_CACHE_MAX = 30;
+const AVATAR_CACHE_MS = 5 * 60_000;
+const avatarCache = new Map<string, { type: string; body: Buffer; at: number }>();
 
 export const isAllowedAvatarUrl = (raw: string): boolean => {
     try {
@@ -78,18 +81,22 @@ export const createRouter = (core: Core): Router => {
         try {
             const url = typeof req.query['url'] === 'string' ? req.query['url'] : '';
             if (!isAllowedAvatarUrl(url)) throw new HttpError(400, 'URL avatar không hợp lệ');
+            const now = Date.now();
+            for (const [k, v] of avatarCache) if (now - v.at > AVATAR_CACHE_MS) avatarCache.delete(k);
             let item = avatarCache.get(url);
             if (!item) {
                 const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
                 const type = r.headers.get('content-type') ?? '';
                 if (!r.ok || !type.startsWith('image/')) throw new HttpError(502, 'Không tải được avatar');
+                if (Number(r.headers.get('content-length') ?? 0) > 2_000_000) throw new HttpError(502, 'Avatar quá lớn');
                 const body = Buffer.from(await r.arrayBuffer());
                 if (body.length > 2_000_000) throw new HttpError(502, 'Avatar quá lớn');
-                item = { type, body };
-                if (avatarCache.size >= 500) avatarCache.delete(avatarCache.keys().next().value as string);
+                item = { type, body, at: now };
+                while (avatarCache.size >= AVATAR_CACHE_MAX) avatarCache.delete(avatarCache.keys().next().value as string);
                 avatarCache.set(url, item);
             }
-            res.set({ 'Content-Type': item.type, 'Cache-Control': 'public, max-age=86400', 'Access-Control-Allow-Origin': '*' });
+            // Trình duyệt (OBS / LIVE Studio) không lưu ảnh vào bộ nhớ đệm trên ổ đĩa
+            res.set({ 'Content-Type': item.type, 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
             res.send(item.body);
         } catch (err) {
             next(err);
@@ -154,6 +161,10 @@ export const createRouter = (core: Core): Router => {
         const intervalMinutes = int(req.body, 'intervalMinutes') ?? current.intervalMinutes;
         const showButterflies = typeof req.body['showButterflies'] === 'boolean' ? req.body['showButterflies'] : current.showButterflies;
         const showBirds = typeof req.body['showBirds'] === 'boolean' ? req.body['showBirds'] : current.showBirds;
+        const rawMode = req.body['mode'];
+        if (rawMode !== undefined && rawMode !== 'image' && rawMode !== 'video') throw new HttpError(400, 'mode phải là image|video');
+        const mode: 'image' | 'video' = rawMode ?? current.mode;
+        const videoId = str(req.body, 'videoId', false) ?? current.videoId;
 
         const updated = {
             presetId,
@@ -161,6 +172,8 @@ export const createRouter = (core: Core): Router => {
             intervalMinutes: Math.max(1, intervalMinutes),
             showButterflies,
             showBirds,
+            mode,
+            videoId,
         };
 
         saveSettings({ background: updated });
@@ -179,10 +192,22 @@ export const createRouter = (core: Core): Router => {
             const v = req.body[key];
             return typeof v === 'number' && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : fallback;
         };
-        const updated = { sfxVolume: vol('sfxVolume', current.sfxVolume), bgmVolume: vol('bgmVolume', current.bgmVolume) };
+        const bool = (key: string, fallback: boolean): boolean =>
+            typeof req.body[key] === 'boolean' ? (req.body[key] as boolean) : fallback;
+        const updated = {
+            sfxVolume: vol('sfxVolume', current.sfxVolume),
+            bgmVolume: vol('bgmVolume', current.bgmVolume),
+            bgmEnabled: bool('bgmEnabled', current.bgmEnabled),
+            muted: bool('muted', current.muted),
+        };
         saveSettings({ audio: updated });
         (core.bus as unknown as NodeJS.EventEmitter).emit('audio:sync', updated);
         res.json(updated);
+    });
+
+    router.post('/audio/next', (_req, res) => {
+        (core.bus as unknown as NodeJS.EventEmitter).emit('audio:next');
+        res.json({ ok: true });
     });
 
     router.post('/printer/pause', (_req, res) => {
@@ -207,6 +232,12 @@ export const createRouter = (core: Core): Router => {
         res.status(result.accepted ? 202 : 200).json(result);
     };
     // Giả lập dữ liệu thô như TikTok gửi (proto v3) đi qua adapter thật: chat | follow | gift (có combo)
+    // Các API giả lập chỉ dùng được trên chính máy chạy server (người chung wifi không gửi quà giả được)
+    router.use('/dev', (req, _res, next) => {
+        const ip = req.socket.remoteAddress ?? '';
+        if (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1') return next();
+        next(new HttpError(403, 'API giả lập chỉ dùng được trên máy chạy server'));
+    });
     router.post('/dev/tiktok/simulate', (req, res) => {
         if (!isRecord(req.body)) throw new HttpError(400, 'Body phải là JSON object');
         const kind = req.body['kind'];

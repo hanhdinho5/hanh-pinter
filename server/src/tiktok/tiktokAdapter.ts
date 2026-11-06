@@ -231,6 +231,8 @@ export class TikTokAdapter {
     }
 
     private readonly streaks = new Map<string, { data: Loose; total: number; timer: NodeJS.Timeout }>();
+    /** Combo đã tự in vì im lặng quá lâu: nhớ số đã in để tín hiệu kết thúc đến muộn không in trùng */
+    private readonly flushed = new Map<string, { count: number; expires: number }>();
 
     private onChat(data: Loose): void {
         this.handler.handle({ type: 'COMMENT', ...extractUser(data), avatarUrl: extractAvatarUrl(data) });
@@ -249,18 +251,29 @@ export class TikTokAdapter {
             return;
         }
         const key = `${extractUser(data).userId}_${gift.giftId}`;
+        const now = Date.now();
+        for (const [k, f] of this.flushed) if (f.expires < now) this.flushed.delete(k);
+        // repeatCount của TikTok là cộng dồn: trừ phần đã in khi combo bị tự in sớm
+        const already = this.flushed.get(key)?.count ?? 0;
         const prev = this.streaks.get(key);
         if (prev) clearTimeout(prev.timer);
         if (data?.repeatEnd) {
             this.streaks.delete(key);
-            this.emitGift(data, total);
+            this.flushed.delete(key);
+            const remaining = Math.max(total, prev?.total ?? 0) - already;
+            if (remaining > 0) this.emitGift(data, remaining);
             return;
         }
-        // phòng khi TikTok không gửi tín hiệu kết thúc: im 4s thì tự in
+        // phòng khi TikTok không gửi tín hiệu kết thúc: im 4s thì tự in phần chưa in
         const timer = setTimeout(() => {
             const cur = this.streaks.get(key);
             this.streaks.delete(key);
-            if (cur) this.emitGift(cur.data, cur.total);
+            if (!cur) return;
+            const done = this.flushed.get(key)?.count ?? 0;
+            if (cur.total > done) {
+                this.emitGift(cur.data, cur.total - done);
+                this.flushed.set(key, { count: cur.total, expires: Date.now() + 60_000 });
+            }
         }, 4000);
         timer.unref();
         this.streaks.set(key, { data, total: Math.max(total, prev?.total ?? 0), timer });

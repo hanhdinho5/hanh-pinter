@@ -18,6 +18,11 @@ export interface UsePrinterSocketOptions {
     onSheetCompleted?: (sheet: Sheet) => void;
     onSheetUpdate?: (sheet: Sheet) => void;
     onBackgroundSync?: (config: BackgroundConfig) => void;
+    /** Mặc định chỉ áp âm lượng; overlay truyền vào để áp cả bật nhạc / tắt tiếng */
+    onAudioSync?: (config: AudioConfig) => void;
+    onAudioNext?: () => void;
+    /** Gọi mỗi lần (re)connect tới server, trước khi nhận lại trạng thái */
+    onConnect?: () => void;
 }
 
 export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
@@ -42,6 +47,7 @@ export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
         const onConnect = () => {
             console.log('[Socket.IO] Connected to backend printer server');
             setIsConnected(true);
+            optionsRef.current.onConnect?.();
         };
 
         const onDisconnect = () => {
@@ -71,8 +77,8 @@ export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
         const onJobStarted = (job: PrintJob) => {
             const currentSpeed = printerStateRef.current?.speed ?? 1;
             const factor = job.kind === 'fullPage' || job.frame === 'vip' ? 2 : 1;
-            // 2.5s base duration * factor / speed
-            const durationSec = (2.5 * factor) / currentSpeed;
+            // Server gửi kèm thời gian in thật; bản server cũ thì tự tính 2.5s * hệ số / tốc độ
+            const durationSec = job.durationMs ? job.durationMs / 1000 : (2.5 * factor) / currentSpeed;
 
             setStatus('printing');
             optionsRef.current.onJobStarted?.(job, durationSec);
@@ -99,7 +105,9 @@ export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
         const onAudioSync = (cfg: AudioConfig) => {
             soundManager.setSfxVolume(cfg.sfxVolume);
             soundManager.setBgmVolume(cfg.bgmVolume);
+            optionsRef.current.onAudioSync?.(cfg);
         };
+        const onAudioNext = () => optionsRef.current.onAudioNext?.();
 
         socket.on('connect', onConnect);
         socket.on('disconnect', onDisconnect);
@@ -116,6 +124,7 @@ export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
         rawSocket.on('tiktok:status', onTikTokStatus);
         rawSocket.on('background:sync', onBackgroundSync);
         rawSocket.on('audio:sync', onAudioSync);
+        rawSocket.on('audio:next', onAudioNext);
 
         if (socket.connected) {
             setIsConnected(true);
@@ -134,6 +143,7 @@ export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
             rawSocket.off('tiktok:status', onTikTokStatus);
             rawSocket.off('background:sync', onBackgroundSync);
             rawSocket.off('audio:sync', onAudioSync);
+            rawSocket.off('audio:next', onAudioNext);
         };
     }, []);
 

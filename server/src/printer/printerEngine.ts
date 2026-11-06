@@ -83,22 +83,26 @@ export class PrinterEngine {
 
     private async process(job: PrintJob): Promise<void> {
         this.currentJob = job;
-        const isWide = job.frame !== 'normal';
-
-        // Đổi tờ (nếu cần) TRƯỚC khi in để client vẽ lên đúng tờ, đúng ô
-        const isFullPage = job.kind === 'fullPage';
-        const early = isFullPage ? this.sheets.prepareFullPage() : this.sheets.prepareEntry(isWide);
-        for (const sheet of early) this.bus.emit('printer:sheet:completed', sheet);
-        if (early.length > 0 || isFullPage) this.bus.emit('printer:sheet', this.sheets.current);
-
-        job.slot = isFullPage ? 0 : this.sheets.getNextSlot(isWide);
-        job.sheetId = this.sheets.current.id;
-        this.bus.emit('printer:job:started', job);
-        this.emitState();
-
+        // Mọi bước đều nằm trong try: lỗi bất kỳ chỉ làm hỏng job này, máy in không bị kẹt
         try {
+            const isWide = job.frame !== 'normal';
+
+            // Đổi tờ (nếu cần) TRƯỚC khi in để client vẽ lên đúng tờ, đúng ô
+            const isFullPage = job.kind === 'fullPage';
+            const early = isFullPage ? this.sheets.prepareFullPage() : this.sheets.prepareEntry(isWide);
+            for (const sheet of early) this.bus.emit('printer:sheet:completed', sheet);
+            if (early.length > 0 || isFullPage) this.bus.emit('printer:sheet', this.sheets.current);
+
             const factor = job.kind === 'fullPage' || job.frame === 'vip' ? this.options.fullPageTimeFactor : 1;
-            await sleep((this.options.basePrintMs * factor) / this.speed);
+            const durationMs = (this.options.basePrintMs * factor) / this.speed;
+
+            job.slot = isFullPage ? 0 : this.sheets.getNextSlot(isWide);
+            job.sheetId = this.sheets.current.id;
+            job.durationMs = durationMs; // client vẽ đúng nhịp với server
+            this.bus.emit('printer:job:started', job);
+            this.emitState();
+
+            await sleep(durationMs);
             this.place(job);
             this.queue.finish(job, 'completed');
             this.bus.emit('printer:job:completed', job);

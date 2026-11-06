@@ -8,6 +8,9 @@ export interface BackgroundSettings {
     intervalMinutes: number;
     showButterflies: boolean;
     showBirds: boolean;
+    /** 'image' = cảnh sống (ảnh động), 'video' = video nền */
+    mode: 'image' | 'video';
+    videoId: string;
 }
 
 export interface AudioSettings {
@@ -15,9 +18,13 @@ export interface AudioSettings {
     sfxVolume: number;
     /** 0..1 – âm lượng nhạc nền */
     bgmVolume: number;
+    /** Overlay có phát nhạc nền không */
+    bgmEnabled: boolean;
+    /** Tắt toàn bộ âm thanh trên overlay */
+    muted: boolean;
 }
 
-export const DEFAULT_AUDIO_SETTINGS: AudioSettings = { sfxVolume: 1, bgmVolume: 0.7 };
+export const DEFAULT_AUDIO_SETTINGS: AudioSettings = { sfxVolume: 1, bgmVolume: 0.7, bgmEnabled: true, muted: false };
 
 export const getAudioConfig = (): AudioSettings => {
     const s = loadSettings();
@@ -38,6 +45,8 @@ export const DEFAULT_BACKGROUND_SETTINGS: BackgroundSettings = {
     intervalMinutes: 5,
     showButterflies: true,
     showBirds: true,
+    mode: 'image',
+    videoId: 'vd1',
 };
 
 export const getBackgroundConfig = (): BackgroundSettings => {
@@ -60,7 +69,10 @@ export const loadSettings = (): PersistedSettings => {
 export const saveSettings = (patch: PersistedSettings): void => {
     try {
         fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(file, JSON.stringify({ ...loadSettings(), ...patch }, null, 2));
+        // Ghi ra file tạm rồi đổi tên: tắt máy đột ngột giữa chừng cũng không làm hỏng settings.json
+        const tmp = `${file}.tmp`;
+        fs.writeFileSync(tmp, JSON.stringify({ ...loadSettings(), ...patch }, null, 2));
+        fs.renameSync(tmp, file);
     } catch (err) {
         console.error('Không lưu được settings.json:', err);
     }
