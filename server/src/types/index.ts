@@ -1,4 +1,4 @@
-export type EventType = 'COMMENT' | 'FOLLOW' | 'GIFT';
+export type EventType = 'COMMENT' | 'FOLLOW' | 'LIKE' | 'SHARE' | 'GIFT';
 
 /** Sự kiện chuẩn hóa, độc lập với TikTok. */
 export interface ViewerEvent {

@@ -4,9 +4,19 @@ import { createCore } from './app.js';
 import { config, type AppConfig } from './config.js';
 import { classifyEvent, normalizeEvent } from './events/eventHandler.js';
 
-const fast: AppConfig = { ...config, printer: { ...config.printer, basePrintMs: 5 } };
+const fast: AppConfig = { ...config, gift: { goldDiamonds: 100, fullPageDiamonds: 1000 }, printer: { ...config.printer, basePrintMs: 5 } };
 
-const comment = (userId: string) => ({ type: 'COMMENT' as const, userId, username: userId });
+const share = (userId: string) => ({ type: 'SHARE' as const, userId, username: userId });
+
+test('ngưỡng 10/30: Hoa hồng nhỏ, heo 10 vàng và bánh vòng 30 VIP', () => {
+    const thresholds = { goldDiamonds: 10, fullPageDiamonds: 30 };
+    const gift = normalizeEvent({ type: 'GIFT', userId: 'u', username: 'u', giftId: 'other', diamondCount: 9 });
+    assert.equal(classifyEvent(gift, thresholds).frame, 'normal');
+    assert.equal(classifyEvent({ ...gift, diamondCount: 10 }, thresholds).frame, 'gold');
+    assert.equal(classifyEvent({ ...gift, diamondCount: 29 }, thresholds).frame, 'gold');
+    assert.equal(classifyEvent({ ...gift, diamondCount: 30 }, thresholds).frame, 'vip');
+    assert.equal(classifyEvent({ ...gift, giftId: '5655', diamondCount: 1 }, thresholds).frame, 'rose');
+});
 
 test('Hoa hồng có khung riêng; đạt ngưỡng vẫn nâng lên vàng/VIP', () => {
     const rose = normalizeEvent({ type: 'GIFT', userId: 'r', username: 'r', giftId: '5655', diamondCount: 1 });
@@ -38,7 +48,7 @@ test('Hoa hồng khung nhỏ chỉ chiếm một ô, bốn lượt đủ một t
     assert.ok(entries.every((entry) => entry.frame === 'rose' && entry.isWide === false));
 });
 
-test('comment/follow được xử lý tuần tự, đủ 4 ảnh thì sang tờ mới', async () => {
+test('chia sẻ/follow được xử lý tuần tự, đủ 4 ảnh thì sang tờ mới', async () => {
     const { handler, engine, sheets, bus } = createCore(fast);
     const order: string[] = [];
     let concurrent = 0;
@@ -52,7 +62,7 @@ test('comment/follow được xử lý tuần tự, đủ 4 ảnh thì sang tờ
     const completedSheets: number[] = [];
     bus.on('printer:sheet:completed', (s) => completedSheets.push(s.entries.length));
 
-    for (let i = 1; i <= 5; i++) handler.handle(i % 2 ? comment(`u${i}`) : { ...comment(`u${i}`), type: 'FOLLOW' });
+    for (let i = 1; i <= 5; i++) handler.handle(i % 2 ? share(`u${i}`) : { ...share(`u${i}`), type: 'FOLLOW' });
     await engine.idle();
 
     assert.deepEqual(order, ['u1', 'u2', 'u3', 'u4', 'u5']);
@@ -63,7 +73,7 @@ test('comment/follow được xử lý tuần tự, đủ 4 ảnh thì sang tờ
 
 test('follow vẫn chống trùng trên cùng tờ và trong queue; quà không bị chặn', async () => {
     const { handler, engine, sheets } = createCore(fast);
-    const follow = { ...comment('a'), type: 'FOLLOW' as const };
+    const follow = { ...share('a'), type: 'FOLLOW' as const };
     assert.equal(handler.handle(follow).accepted, true);
     assert.equal(handler.handle(follow).accepted, false); // trong queue/đang in
     await engine.idle();
@@ -81,8 +91,8 @@ test('gift được ưu tiên, khung vàng, in nguyên trang', async () => {
     const started: string[] = [];
     bus.on('printer:job:started', (j) => started.push(j.userId));
 
-    handler.handle(comment('c1')); // bắt đầu in ngay
-    handler.handle(comment('c2'));
+    handler.handle(share('c1')); // bắt đầu in ngay
+    handler.handle(share('c2'));
     const rose = handler.handle({ type: 'GIFT', userId: 'r', username: 'r', giftName: 'Rose', diamondCount: 1 });
     const gold = handler.handle({ type: 'GIFT', userId: 'g', username: 'g', diamondCount: 100 });
     const big = handler.handle({ type: 'GIFT', userId: 'b', username: 'b', diamondCount: 500, giftCount: 2 });
@@ -99,13 +109,13 @@ test('gift được ưu tiên, khung vàng, in nguyên trang', async () => {
 
 test('pause/resume: job đang in xong rồi dừng, resume thì chạy tiếp', async () => {
     const { handler, engine, queue } = createCore(fast);
-    handler.handle(comment('p1'));
-    handler.handle(comment('p2'));
+    handler.handle(share('p1'));
+    handler.handle(share('p2'));
     engine.pause();
     await engine.idle();
     assert.equal(engine.getState().status, 'paused');
     assert.equal(queue.size, 1);
-    handler.handle(comment('p3'));
+    handler.handle(share('p3'));
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(queue.size, 2); // không in khi đang pause
     engine.resume();
@@ -116,7 +126,7 @@ test('pause/resume: job đang in xong rồi dừng, resume thì chạy tiếp', 
 
 test('không mất job khi nhận nhiều event liên tục', async () => {
     const { handler, engine, sheets } = createCore({ ...fast, queue: { ...fast.queue, maxFree: 1000 } });
-    for (let i = 0; i < 50; i++) handler.handle(comment(`m${i}`));
+    for (let i = 0; i < 50; i++) handler.handle(share(`m${i}`));
     await engine.idle();
     assert.equal(sheets.completedCount * 4 + sheets.current.entries.length, 50);
 });
@@ -143,10 +153,10 @@ test('đổi tờ TRƯỚC khi bắt đầu in (client vẽ đúng tờ, đúng 
     bus.on('printer:sheet', (s) => log.push(`sheet#${s.id}:${s.kind}`));
     bus.on('printer:job:started', (j) => log.push(`start:${j.userId}@${j.sheetId}/${j.slot}`));
 
-    handler.handle(comment('a')); // hàng 0
+    handler.handle(share('a')); // hàng 0
     await engine.idle();
-    handler.handle(comment('b')); // hàng 0
-    handler.handle(comment('c')); // hàng 1 -> 2 hàng đều có người
+    handler.handle(share('b')); // hàng 0
+    handler.handle(share('c')); // hàng 1 -> 2 hàng đều có người
     await engine.idle();
     log.length = 0;
 
@@ -167,46 +177,66 @@ test('đổi tờ TRƯỚC khi bắt đầu in (client vẽ đúng tờ, đúng 
     assert.equal(sheets.current.entries.length, 0);
 });
 
-test('5 comment được in, chặn lượt 6; đúng 5 phút sau cấp lại 5 lượt', (t) => {
-    t.mock.timers.enable({ apis: ['Date'] });
+test('mỗi comment in một lượt, đủ 5 khóa; sau 7 phút xóa bộ đếm, comment chặn không kéo dài', (t) => {
+    t.mock.timers.enable({ apis: ['Date', 'setInterval'] });
     const { handler, engine } = createCore(fast);
     engine.pause();
-    for (let i = 0; i < 4; i++) assert.equal(handler.handle(comment('u1')).accepted, true);
-    t.mock.timers.tick(60000);
-    assert.equal(handler.handle(comment('u1')).accepted, true);
-    assert.equal(handler.handle(comment('u1')).accepted, false);
-    assert.equal(handler.handle(comment('u2')).accepted, true);
-    const gift = handler.handle({ type: 'GIFT', userId: 'u1', username: 'u1', diamondCount: 1, giftCount: 1 });
-    assert.equal(gift.accepted, true);
-    t.mock.timers.tick(299999);
-    assert.equal(handler.handle(comment('u1')).accepted, false);
+    const input = { type: 'COMMENT' as const, userId: 'u1', username: 'Minh Anh' };
+    for (let i = 0; i < 4; i++) {
+        assert.equal(handler.handle(input).accepted, true);
+    }
+    assert.equal(handler.handle(input).accepted, true);
+    assert.equal(handler.handle(input).accepted, false);
+    // Comment bị chặn không cản tim, chia sẻ hoặc quà của cùng người.
+    assert.equal(handler.handle({ ...input, type: 'LIKE' }).accepted, true);
+    assert.equal(handler.handle({ ...input, type: 'SHARE' }).accepted, true);
+    assert.equal(handler.handle({ ...input, type: 'GIFT', diamondCount: 1 }).accepted, true);
+    t.mock.timers.tick(7 * 60000 - 1);
+    assert.equal(handler.handle(input).accepted, false);
     t.mock.timers.tick(1);
-    for (let i = 0; i < 5; i++) assert.equal(handler.handle(comment('u1')).accepted, true);
-    assert.equal(handler.handle(comment('u1')).accepted, false);
+    const state = handler as unknown as { commentProgress: Map<string, unknown> };
+    assert.equal(state.commentProgress.size, 0);
+    for (let i = 0; i < 4; i++) assert.equal(handler.handle(input).accepted, true);
+    assert.equal(handler.handle(input).accepted, true);
+    assert.equal(handler.handle(input).accepted, false);
 });
 
-test('comment bị từ chối vì queue đầy không tiêu hao lượt', async () => {
+test('bộ đếm comment chưa đủ 5 cũng được dọn khi không hoạt động 7 phút', (t) => {
+    t.mock.timers.enable({ apis: ['Date', 'setInterval'] });
+    const { handler, engine } = createCore(fast);
+    engine.pause();
+    const input = { type: 'COMMENT' as const, userId: 'partial', username: 'Linh Đan' };
+    for (let i = 0; i < 4; i++) handler.handle(input);
+    t.mock.timers.tick(7 * 60000);
+    assert.equal((handler as unknown as { commentProgress: Map<string, unknown> }).commentProgress.size, 0);
+    assert.equal(handler.handle(input).accepted, true);
+});
+
+test('queue đầy không mất lượt comment; follow chỉ in một lần dù đổi tờ', async () => {
     const { handler, engine } = createCore({ ...fast, queue: { ...fast.queue, maxFree: 1 } });
     engine.pause();
-    assert.equal(handler.handle(comment('other')).accepted, true);
-    for (let i = 0; i < 6; i++) {
-        const result = handler.handle(comment('u'));
-        assert.ok(!result.accepted && result.reason === 'queue_full');
-    }
+    handler.handle(share('other'));
+    const input = { type: 'COMMENT' as const, userId: 'u', username: 'u' };
+    for (let i = 0; i < 4; i++) handler.handle(input);
+    const result = handler.handle(input);
+    assert.ok(!result.accepted && result.reason === 'queue_full');
     engine.resume();
     await engine.idle();
-    for (let i = 0; i < 5; i++) {
-        assert.equal(handler.handle(comment('u')).accepted, true);
-        await engine.idle();
-    }
-    assert.equal(handler.handle(comment('u')).accepted, false);
+    assert.equal(handler.handle(input).accepted, true);
+    await engine.idle();
+    for (let i = 0; i < 4; i++) { assert.equal(handler.handle(input).accepted, true); await engine.idle(); }
+    assert.equal(handler.handle(input).accepted, false);
+    const follow = { type: 'FOLLOW' as const, userId: 'f', username: 'f' };
+    assert.equal(handler.handle(follow).accepted, true);
+    await engine.idle();
+    for (let i = 0; i < 5; i++) { handler.handle(share('x' + i)); await engine.idle(); }
+    assert.equal(handler.handle(follow).accepted, false);
 });
-
 test('quà thường không chiếm hết lượt: cứ 3 quà thì nhường 1 comment', async () => {
     const { handler, engine, bus } = createCore(fast);
     engine.pause();
     for (let i = 0; i < 6; i++) handler.handle({ type: 'GIFT', userId: `g${i}`, username: `g${i}`, diamondCount: 1, giftCount: 1 });
-    handler.handle(comment('c1'));
+    handler.handle(share('c1'));
     const order: string[] = [];
     bus.on('printer:job:started', (job) => order.push(job.userId));
     engine.resume();

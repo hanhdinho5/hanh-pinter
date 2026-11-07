@@ -26,15 +26,13 @@ export const config = {
     },
     gift: {
         /** Tổng kim cương (diamondCount * giftCount) để ra khung vàng. */
-        goldDiamonds: num('GOLD_DIAMONDS', saved.goldDiamonds ?? 100),
-        /** Tổng kim cương để in nguyên một trang. */
-        fullPageDiamonds: num('FULL_PAGE_DIAMONDS', saved.fullPageDiamonds ?? 1000),
+        goldDiamonds: num('GOLD_DIAMONDS', saved.goldDiamonds ?? 10),
+        /** Tổng kim cương để dùng khung VIP vương miện. */
+        fullPageDiamonds: num('FULL_PAGE_DIAMONDS', saved.fullPageDiamonds ?? 30),
     },
     queue: {
         /** Số lượt in miễn phí tối đa đang chờ; vượt thì bỏ comment/follow mới (tránh in trễ hàng chục phút). */
         maxFree: num('MAX_FREE_QUEUE', 30),
-        /** Mỗi người được in miễn phí (comment/follow) tối đa 1 lần trong khoảng này (phút). */
-        freeCooldownMinutes: num('FREE_COOLDOWN_MINUTES', 10),
     },
     /** Số job đã hoàn tất giữ lại trong bộ nhớ. */
     historyLimit: 50,

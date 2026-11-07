@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import type { AppConfig } from '../config.js';
-import type { SheetManager } from '../printer/sheetManager.js';
 import type { PrinterEngine } from '../printer/printerEngine.js';
 import type { PrintQueue } from '../queue/printQueue.js';
 import type { Bus } from './bus.js';
@@ -49,52 +48,46 @@ export const classifyEvent = (event: ViewerEvent, gift: AppConfig['gift']): Clas
 export class EventHandler {
     constructor(
         private readonly queue: PrintQueue,
-        private readonly sheets: SheetManager,
         private readonly engine: PrinterEngine,
         private readonly bus: Bus,
         private readonly giftConfig: AppConfig['gift'],
         private readonly maxFreeQueue: number = Infinity,
-        /** Một người chỉ được in miễn phí lại sau khoảng này (ms); 0 = chỉ chặn trùng trong 1 tờ */
-        private readonly freeCooldownMs: number = 0,
     ) {}
 
-    private readonly lastFreePrint = new Map<string, number>();
-    private readonly commentQuota = new Map<string, { count: number; blockedUntil: number }>();
-    private readonly commentCooldownMs = 5 * 60_000;
+    private readonly followedUsers = new Set<string>();
+    private readonly commentProgress = new Map<string, { count: number; expiresAt: number; blocked: boolean }>();
+    private readonly commentResetMs = 7 * 60_000;
+    private commentCleanupTimer: ReturnType<typeof setInterval> | null = null;
 
-    private inCooldown(userId: string, now: number): boolean {
-        if (this.freeCooldownMs <= 0) return false;
-        const last = this.lastFreePrint.get(userId);
-        return last !== undefined && now - last < this.freeCooldownMs;
-    }
-
-    private markFreePrint(userId: string, now: number): void {
-        if (this.freeCooldownMs <= 0) return;
-        if (this.lastFreePrint.size > 5000) {
-            for (const [id, t] of this.lastFreePrint) if (now - t >= this.freeCooldownMs) this.lastFreePrint.delete(id);
+    private cleanComments(now: number): void {
+        for (const [id, state] of this.commentProgress) {
+            if (state.expiresAt <= now) this.commentProgress.delete(id);
         }
-        this.lastFreePrint.set(userId, now);
+        if (this.commentProgress.size === 0 && this.commentCleanupTimer) {
+            clearInterval(this.commentCleanupTimer);
+            this.commentCleanupTimer = null;
+        }
     }
 
+    private scheduleCommentCleanup(): void {
+        if (this.commentCleanupTimer) return;
+        // Một timer dùng chung; không giữ avatar/nội dung comment trong bộ đếm.
+        this.commentCleanupTimer = setInterval(() => this.cleanComments(Date.now()), 1000);
+        this.commentCleanupTimer.unref();
+    }
     handle(input: NewEventInput): HandleResult {
         const event = normalizeEvent(input);
         this.bus.emit('event', event);
 
         const rule = classifyEvent(event, this.giftConfig);
 
-        // Comment: 5 lượt được nhận, rồi nghỉ 5 phút tính từ lượt thứ 5.
-        const quota = this.commentQuota.get(event.userId);
-        if (event.type === 'COMMENT' && quota && quota.blockedUntil > event.timestamp) {
+        this.cleanComments(event.timestamp);
+        if (event.type === 'FOLLOW' && this.followedUsers.has(event.userId)) {
             return { accepted: false, reason: 'duplicate', event };
         }
-        // Follow vẫn chống trùng như trước; quà không bị giới hạn.
-        if (
-            event.type === 'FOLLOW' &&
-            (this.sheets.hasUser(event.userId) ||
-                this.queue.hasFreeJobFor(event.userId) ||
-                this.inCooldown(event.userId, event.timestamp))
-        ) {
-            return { accepted: false, reason: 'duplicate', event };
+        if (event.type === 'COMMENT') {
+            const state = this.commentProgress.get(event.userId);
+            if (state?.blocked) return { accepted: false, reason: 'duplicate', event };
         }
         if (rule.lane === 'free' && this.queue.freeSize >= this.maxFreeQueue) {
             return { accepted: false, reason: 'queue_full', event };
@@ -115,18 +108,11 @@ export class EventHandler {
             slot: null,
         };
         if (event.type === 'COMMENT') {
-            // Dọn các đợt chờ đã hết hạn; comment bị từ chối không kéo dài thời gian chờ.
-            for (const [id, state] of this.commentQuota) {
-                if (state.blockedUntil > 0 && state.blockedUntil <= event.timestamp) this.commentQuota.delete(id);
-            }
-            const previous = this.commentQuota.get(event.userId);
-            const count = (previous?.count ?? 0) + 1;
-            this.commentQuota.set(event.userId, {
-                count,
-                blockedUntil: count >= 5 ? event.timestamp + this.commentCooldownMs : 0,
-            });
+            const count = (this.commentProgress.get(event.userId)?.count ?? 0) + 1;
+            this.commentProgress.set(event.userId, { count, blocked: count >= 5, expiresAt: event.timestamp + this.commentResetMs });
+            this.scheduleCommentCleanup();
         }
-        if (event.type === 'FOLLOW') this.markFreePrint(event.userId, event.timestamp);
+        if (event.type === 'FOLLOW') this.followedUsers.add(event.userId);
         this.queue.enqueue(job);
         this.engine.kick();
         return { accepted: true, job, event };

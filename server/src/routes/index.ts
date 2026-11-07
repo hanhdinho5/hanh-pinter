@@ -313,12 +313,13 @@ export const createRouter = (core: Core): Router => {
     router.post('/dev/tiktok/simulate', (req, res) => {
         if (!isRecord(req.body)) throw new HttpError(400, 'Body phải là JSON object');
         const kind = req.body['kind'];
-        if (kind !== 'chat' && kind !== 'follow' && kind !== 'gift') throw new HttpError(400, 'kind phải là chat|follow|gift');
+        if (kind !== 'chat' && kind !== 'follow' && kind !== 'gift' && kind !== 'like' && kind !== 'share') throw new HttpError(400, 'kind phải là chat|follow|gift|like|share');
         const id = str(req.body, 'uniqueId', true) as string;
         const avatarUrl = str(req.body, 'avatarUrl', false);
         const data: Record<string, unknown> = {
             user: { userId: `sim-${id}`, uniqueId: id, nickname: id, avatarThumb: { urlList: avatarUrl ? [avatarUrl] : [] } },
             comment: 'xin chào',
+            likeCount: int(req.body, 'likeCount') ?? 10,
         };
         if (kind === 'gift') {
             Object.assign(data, {

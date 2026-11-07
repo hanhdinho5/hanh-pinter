@@ -23,12 +23,10 @@ export const createCore = (cfg: AppConfig = config): Core => {
     const engine = new PrinterEngine(queue, sheets, bus, cfg.printer);
     const handler = new EventHandler(
         queue,
-        sheets,
         engine,
         bus,
         cfg.gift,
         cfg.queue.maxFree,
-        (cfg.queue.freeCooldownMinutes ?? 0) * 60_000,
     );
     const tiktok = new TikTokAdapter(handler, bus);
     return { bus, queue, sheets, engine, handler, tiktok };

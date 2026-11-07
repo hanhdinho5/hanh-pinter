@@ -29,10 +29,11 @@ Trên Windows: `dev-server.bat` và `dev-client.bat`, hoặc `live.bat` (bật c
 Thử khi chưa live: ở `/admin` dùng các nút "Giả lập TikTok" (Chat, Follow, quà 1000, combo Rose).
 
 ## Quy tắc in
-- Comment: mỗi người tối đa 5 lượt được nhận, sau đó chờ 5 phút tính từ lượt thứ 5 để có lại 5 lượt. Comment bị chặn không kéo dài thời gian chờ; hàng đợi đầy không tính lượt.
-- Follow: vẫn chống trùng trên cùng tờ và áp dụng thời gian chờ riêng như trước.
+- Comment: mỗi comment tạo 1 lượt in, tối đa 5 lượt/người. Sau lượt thứ 5 khóa 7 phút rồi xóa bộ đếm để bắt đầu lại. Comment bị chặn không kéo dài thời gian chờ; hàng đợi đầy không tính lượt. Bộ đếm chưa đủ 5 cũng tự xóa sau 7 phút không có comment được nhận; dùng một timer dọn chung, không lưu nội dung/ảnh trong bộ đếm.
+- Follow: mỗi ID người xem chỉ được in một lần trong phiên chạy backend, kể cả khi đã đổi tờ.
+- Thả tim: tính riêng từng người; 5 lượt đầu cần 10 tim/lượt, từ lượt thứ 6 cần 30 tim/lượt. Giữ tim dư; không dùng chung hạn mức comment. Chia sẻ: mỗi sự kiện tạo 1 lượt in thường. Quà lặp cùng người vẫn được in theo quy tắc quà/combo.
 - Hàng đợi miễn phí giới hạn `MAX_FREE_QUEUE` (mặc định 30): đầy thì comment/follow mới bị bỏ để avatar không in trễ hàng chục phút.
-- Quà: luôn được in. Tổng kim cương (kim cương x số lượng, combo gộp thành một vé) từ 100 là khung vàng, từ 1000 in nguyên trang. Đổi ngưỡng ở `/admin`.
+- Quà: luôn được in. Tổng kim cương (kim cương x số lượng, combo gộp thành một vé) từ 10 là khung vàng, từ 30 là khung VIP vương miện. Đổi ngưỡng ở `/admin`.
 
 ## Cấu hình
 `server/.env` (không commit), đều tùy chọn:
@@ -40,9 +41,9 @@ Thử khi chưa live: ở `/admin` dùng các nút "Giả lập TikTok" (Chat, F
 ```
 PORT=3001
 CLIENT_ORIGIN=http://localhost:5173
-GOLD_DIAMONDS=100
+GOLD_DIAMONDS=10
 MAX_FREE_QUEUE=30
-FULL_PAGE_DIAMONDS=1000
+FULL_PAGE_DIAMONDS=30
 ```
 
 Ngưỡng quà và username TikTok đổi ở `/admin` được lưu trong `server/data/settings.json`.

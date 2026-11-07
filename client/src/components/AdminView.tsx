@@ -79,8 +79,8 @@ export function AdminView() {
     };
     const [username, setUsername] = useState('');
     const [msg, setMsg] = useState('');
-    const [gold, setGold] = useState(100);
-    const [full, setFull] = useState(1000);
+    const [gold, setGold] = useState(10);
+    const [full, setFull] = useState(30);
     const [giftMsg, setGiftMsg] = useState('');
     const [speed, setSpeed] = useState(1);
 
@@ -529,10 +529,15 @@ export function AdminView() {
                     <div style={{ fontSize: 12, color: '#64748b' }}>Giả lập TikTok (đi qua adapter thật, không cần live):</div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                         <button style={btn('#7c3aed')} onClick={() => run(sim({ kind: 'chat', uniqueId: rid() }))}>Chat</button>
+                        <button style={btn('#7c3aed')} onClick={() => run((async () => { const id = rid(); for (let i = 0; i < 5; i++) await sim({ kind: 'chat', uniqueId: id }); })())}>5 bình luận</button>
                         <button style={btn('#7c3aed')} onClick={() => run(sim({ kind: 'follow', uniqueId: rid() }))}>Follow</button>
+                        <button style={btn('#e11d48')} onClick={() => run(sim({ kind: 'like', uniqueId: rid(), likeCount: 10 }))}>❤️ 10 tim</button>
+                        <button style={btn('#e11d48')} onClick={() => run((async () => { const id = rid(); await sim({ kind: 'like', uniqueId: id, likeCount: 50 }); await sim({ kind: 'like', uniqueId: id, likeCount: 30 }); })())}>❤️ 50 + 30 tim</button>
+                        <button style={btn('#0284c7')} onClick={() => run(sim({ kind: 'share', uniqueId: rid() }))}>↗️ Chia sẻ</button>
                         <button style={btn('#be185d')} onClick={() => run(sim({ kind: 'gift', uniqueId: rid(), giftId: 5655, giftName: 'Rose', diamondCount: 1, repeatCount: 1, streakable: true, repeatEnd: true }))}>🌹 Hoa hồng ×1</button>
                         <button style={btn('#7c3aed')} onClick={() => run((async () => { for (let i = 0; i < 10; i++) { await sim({ kind: 'chat', uniqueId: rid() }); await delay(150); } })())}>10 người chat</button>
-                        <button style={btn('#7c3aed')} onClick={() => run(sim({ kind: 'gift', uniqueId: rid(), giftName: 'Galaxy', diamondCount: 1000 }))}>Quà 1000💎</button>
+                        <button style={btn('#7c3aed')} onClick={() => run(sim({ kind: 'gift', uniqueId: rid(), giftId: 900010, giftName: 'Chú heo may mắn', diamondCount: 10 }))}>🐷 Heo · 10 xu</button>
+                        <button style={btn('#7c3aed')} onClick={() => run(sim({ kind: 'gift', uniqueId: rid(), giftId: 900030, giftName: 'Bánh vòng', diamondCount: 30 }))}>🍩 Bánh vòng · 30 xu</button>
                         <button style={btn('#7c3aed')} onClick={() => run((async () => { const u = rid(); for (let n = 20; n <= 100; n += 20) { await sim({ kind: 'gift', uniqueId: u, giftName: 'Rose', diamondCount: 1, streakable: true, repeatCount: n }); await delay(400); } await sim({ kind: 'gift', uniqueId: u, giftName: 'Rose', diamondCount: 1, streakable: true, repeatCount: 100, repeatEnd: true }); })())}>Combo Rose ×100</button>
                     </div>
                     <div style={{ fontSize: 12, color: '#64748b' }}>Thử nhanh (bỏ qua adapter):</div>

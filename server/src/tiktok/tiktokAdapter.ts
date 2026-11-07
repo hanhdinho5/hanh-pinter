@@ -133,6 +133,8 @@ export class TikTokAdapter {
     }
 
     private async teardown(): Promise<void> {
+        this.likeRemainders.clear();
+        this.interactionMessages.clear();
         this.shouldReconnect = false;
         if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
         this.reconnectTimeout = null;
@@ -206,6 +208,8 @@ export class TikTokAdapter {
         conn.on(WebcastEvent.CHAT, safe('chat', (d) => this.onChat(d)));
         conn.on(WebcastEvent.FOLLOW, safe('follow', (d) => this.onFollow(d)));
         conn.on(WebcastEvent.GIFT, safe('gift', (d) => this.onGift(d)));
+        conn.on(WebcastEvent.LIKE, safe('like', (d) => this.onLike(d)));
+        conn.on(WebcastEvent.SHARE, safe('share', (d) => this.onShare(d)));
 
         conn.on(ControlEvent.DISCONNECTED, () => {
             if (!current()) return;
@@ -241,6 +245,49 @@ export class TikTokAdapter {
 
     private onFollow(data: Loose): void {
         this.handler.handle({ type: 'FOLLOW', ...extractUser(data), avatarUrl: extractAvatarUrl(data) });
+    }
+
+    private readonly likeRemainders = new Map<string, { count: number; prints: number }>();
+    private readonly interactionMessages = new Map<string, number>();
+
+    private duplicateInteraction(kind: string, data: Loose): boolean {
+        const id = data.common?.msgId ?? data.msgId;
+        if (!id || String(id) === '0') return false;
+        const key = `${kind}:${String(id)}`;
+        const now = Date.now();
+        const previous = this.interactionMessages.get(key);
+        if (previous !== undefined && now - previous < 5 * 60_000) return true;
+        if (this.interactionMessages.size >= 5000) {
+            this.interactionMessages.delete(this.interactionMessages.keys().next().value!);
+        }
+        this.interactionMessages.set(key, now);
+        return false;
+    }
+
+    private onLike(data: Loose): void {
+        const user = extractUser(data);
+        // Không dùng totalLikeCount/total: đây là tổng tim cả phòng.
+        const count = Number(data.likeCount ?? data.count);
+        if (user.userId === 'anonymous' || !Number.isSafeInteger(count) || count <= 0) return;
+        if (this.duplicateInteraction('like', data)) return;
+        const state = this.likeRemainders.get(user.userId) ?? { count: 0, prints: 0 };
+        state.count = Math.min(Number.MAX_SAFE_INTEGER, state.count + count);
+        this.likeRemainders.set(user.userId, state);
+        // Chỉ 5 lượt đầu dùng 10 tim; từ lượt 6 luôn là 30 tim.
+        while (state.count >= (state.prints < 5 ? 10 : 30)) {
+            const required = state.prints < 5 ? 10 : 30;
+            const result = this.handler.handle({ type: 'LIKE', ...user, avatarUrl: extractAvatarUrl(data) });
+            if (!result.accepted) break;
+            state.count -= required;
+            state.prints = Math.min(5, state.prints + 1);
+        }
+    }
+
+    private onShare(data: Loose): void {
+        const user = extractUser(data);
+        if (user.userId === 'anonymous') return;
+        if (this.duplicateInteraction('share', data)) return;
+        this.handler.handle({ type: 'SHARE', ...user, avatarUrl: extractAvatarUrl(data) });
     }
 
     /** Combo: TikTok gửi lại cùng quà với repeatCount cộng dồn -> gộp thành MỘT vé với tổng, in khi combo kết thúc. */
@@ -295,9 +342,11 @@ export class TikTokAdapter {
     }
 
     /** Dùng để thử khi chưa live: đưa dữ liệu thô (đúng dạng TikTok) vào đúng đường xử lý thật. */
-    public simulate(kind: 'chat' | 'follow' | 'gift', data: Loose): void {
+    public simulate(kind: 'chat' | 'follow' | 'gift' | 'like' | 'share', data: Loose): void {
         if (kind === 'chat') this.onChat(data);
         else if (kind === 'follow') this.onFollow(data);
+        else if (kind === 'like') this.onLike(data);
+        else if (kind === 'share') this.onShare(data);
         else this.onGift(data);
     }
 

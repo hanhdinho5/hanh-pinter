@@ -188,12 +188,14 @@ function ActionBadges({ frameWidth }: { frameWidth: number }) {
     const badges = [
         { icon: '💬', title: 'Bình luận', sub: 'In ảnh', color: '#7dd3fc' },
         { icon: '➕', title: 'Follow', sub: 'In ảnh', color: '#86efac' },
+        { icon: '❤️', title: '10 tim', sub: 'In ảnh', color: '#fda4af' },
+        { icon: '↗️', title: 'Chia sẻ', sub: 'In ảnh', color: '#7dd3fc' },
         { icon: '🌹', title: '', sub: 'In khung', color: '#fda4af' },
         { icon: '', giftIcon: 'pig', title: '', sub: 'Khung to vàng', color: '#fcd34d' },
         { icon: '', giftIcon: 'donut', title: '', sub: 'Khung to VIP', color: '#f0abfc' },
     ];
     // Thu gọn dải hướng dẫn, vẫn tăng theo kích thước nguồn overlay.
-    const fontSize = Math.max(7, Math.min(18, frameWidth * 0.017));
+    const fontSize = Math.max(6, Math.min(15, frameWidth * 0.014));
     return (
         <div
             style={{
@@ -203,7 +205,7 @@ function ActionBadges({ frameWidth }: { frameWidth: number }) {
                 right: '4%',
                 zIndex: 20,
                 display: 'grid',
-                gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+                gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
                 gap: `${fontSize * 0.45}px`,
                 padding: `0 ${fontSize * 0.8}px`,
                 pointerEvents: 'none',
