@@ -28,6 +28,6 @@ export const createCore = (cfg: AppConfig = config): Core => {
         cfg.gift,
         cfg.queue.maxFree,
     );
-    const tiktok = new TikTokAdapter(handler, bus);
+    const tiktok = new TikTokAdapter(handler, bus, cfg.interactions);
     return { bus, queue, sheets, engine, handler, tiktok };
 };

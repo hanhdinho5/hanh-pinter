@@ -38,15 +38,15 @@ const latest = () => FakeAudio.instances.at(-1)!;
 test('select a playlist track, restart same track and ignore invalid selections', () => {
     const manager = fresh();
     try {
-        assert.equal(manager.getBgmPlaylist().length, 6);
-        manager.selectBgmTrack(2);
+        assert.equal(manager.getBgmPlaylist()[0], '/music/emin-jony-kamin-1h.m4a');
+        manager.selectBgmTrack(3);
         assert.match(manager.getCurrentTrackName(), /study-relax/);
         latest().currentTime = 120;
-        manager.selectBgmTrack(2);
+        manager.selectBgmTrack(3);
         assert.equal(latest().currentTime, 0);
         const count = FakeAudio.instances.length;
         manager.selectBgmTrack(-1);
-        manager.selectBgmTrack(6);
+        manager.selectBgmTrack(manager.getBgmPlaylist().length);
         manager.selectBgmTrack(1.5);
         assert.equal(FakeAudio.instances.length, count);
         latest().emit('ended');
@@ -108,12 +108,12 @@ test('ended advances once, ignores old events, and wraps the playlist', () => {
         const first = latest();
         first.emit('playing');
         first.emit('ended');
-        assert.match(manager.getCurrentTrackName(), /chill-beats/);
+        assert.equal(manager.getCurrentTrackName(), manager.getBgmPlaylist()[1].split('/').pop());
         first.emit('error');
         first.emit('ended');
         assert.equal(FakeAudio.instances.length, 2);
-        for (let i = 0; i < 5; i++) latest().emit('ended');
-        assert.match(manager.getCurrentTrackName(), /piano-water/);
+        for (let i = 0; i < manager.getBgmPlaylist().length - 1; i++) latest().emit('ended');
+        assert.equal(manager.getCurrentTrackName(), manager.getBgmPlaylist()[0].split('/').pop());
     } finally { manager.stopBgm(); }
 });
 
@@ -139,7 +139,7 @@ test('unplayable playlist stops after one pass, including rejection/error duplic
         const first = latest();
         first.emit('error');
         for (let i = 0; i < 10; i++) await Promise.resolve();
-        assert.equal(FakeAudio.instances.length, 6);
+        assert.equal(FakeAudio.instances.length, manager.getBgmPlaylist().length);
         assert.equal(manager.isBgmWanted(), false);
     } finally { manager.stopBgm(); }
 });
@@ -151,9 +151,9 @@ test('watchdog recovers a missing ended event and a stalled stream', (t) => {
         manager.startBgm();
         latest().ended = true;
         t.mock.timers.tick(5000);
-        assert.match(manager.getCurrentTrackName(), /chill-beats/);
+        assert.equal(manager.getCurrentTrackName(), manager.getBgmPlaylist()[1].split('/').pop());
         t.mock.timers.tick(45000);
-        assert.match(manager.getCurrentTrackName(), /study-relax/);
+        assert.equal(manager.getCurrentTrackName(), manager.getBgmPlaylist()[2].split('/').pop());
     } finally { manager.stopBgm(); }
 });
 
@@ -166,12 +166,12 @@ test('autoplay denial retries the same track, rapid next ignores stale promises'
         await Promise.resolve();
         t.mock.timers.tick(45000);
         await Promise.resolve();
-        assert.match(manager.getCurrentTrackName(), /piano-water/);
+        assert.equal(manager.getCurrentTrackName(), manager.getBgmPlaylist()[0].split('/').pop());
         manager.nextTrack();
         manager.nextTrack();
         FakeAudio.rejection = undefined;
         await Promise.resolve();
-        assert.match(manager.getCurrentTrackName(), /study-relax/);
+        assert.equal(manager.getCurrentTrackName(), manager.getBgmPlaylist()[2].split('/').pop());
         assert.equal(FakeAudio.instances.length, 3);
     } finally { manager.stopBgm(); }
 });

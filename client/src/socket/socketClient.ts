@@ -126,6 +126,15 @@ export const api = {
         const res = await fetch(`${serverUrl}/api/config/gift`);
         return parse(res) as Promise<{ goldDiamonds: number; fullPageDiamonds: number }>;
     },
+    async getJoinConfig(serverUrl = DEFAULT_SERVER_URL): Promise<{ printOnJoin: boolean }> {
+        return parse(await fetch(`${serverUrl}/api/config/join`));
+    },
+    async setJoinConfig(printOnJoin: boolean, serverUrl = DEFAULT_SERVER_URL): Promise<{ printOnJoin: boolean }> {
+        return parse(await fetch(`${serverUrl}/api/config/join`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ printOnJoin }),
+        }));
+    },
     async setGiftConfig(goldDiamonds: number, fullPageDiamonds: number, serverUrl = DEFAULT_SERVER_URL) {
         const res = await fetch(`${serverUrl}/api/config/gift`, {
             method: 'PUT',

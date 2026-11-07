@@ -14,6 +14,7 @@ const num = (name: string, fallback: number): number => {
 export const config = {
     port: num('PORT', 3001),
     clientOrigin: process.env['CLIENT_ORIGIN'] ?? 'http://localhost:5173',
+    interactions: { printOnJoin: saved.printOnJoin === true },
     printer: {
         /** Số avatar trên mỗi tờ (mặc định 4 avatar: 2 hàng x 2 cột). */
         sheetCapacity: num('SHEET_CAPACITY', 4),

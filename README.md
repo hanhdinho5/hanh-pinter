@@ -29,6 +29,7 @@ Trên Windows: `dev-server.bat` và `dev-client.bat`, hoặc `live.bat` (bật c
 Thử khi chưa live: ở `/admin` dùng các nút "Giả lập TikTok" (Chat, Follow, quà 1000, combo Rose).
 
 ## Quy tắc in
+- `/admin` → TikTok LIVE → **In ảnh khi người xem vừa vào LIVE**: mặc định tắt; bật sẽ tạo lượt in thường từ sự kiện người xem tham gia, dùng tên/ảnh TikTok. Lưu ngay và giữ cài đặt sau khi khởi động lại. Không in hồi tố người đã vào; hàng đợi thường đầy thì bỏ lượt vào mới. Tắt không hủy các lượt đã xếp hàng.
 - Comment: mỗi comment tạo 1 lượt in, tối đa 5 lượt/người. Sau lượt thứ 5 khóa 7 phút rồi xóa bộ đếm để bắt đầu lại. Comment bị chặn không kéo dài thời gian chờ; hàng đợi đầy không tính lượt. Bộ đếm chưa đủ 5 cũng tự xóa sau 7 phút không có comment được nhận; dùng một timer dọn chung, không lưu nội dung/ảnh trong bộ đếm.
 - Follow: mỗi ID người xem chỉ được in một lần trong phiên chạy backend, kể cả khi đã đổi tờ.
 - Thả tim: tính riêng từng người; 5 lượt đầu cần 10 tim/lượt, từ lượt thứ 6 cần 30 tim/lượt. Giữ tim dư; không dùng chung hạn mức comment. Chia sẻ: mỗi sự kiện tạo 1 lượt in thường. Quà lặp cùng người vẫn được in theo quy tắc quà/combo.

@@ -86,6 +86,7 @@ export class TikTokAdapter {
     constructor(
         private readonly handler: EventHandler,
         private readonly bus?: Bus,
+        private readonly interactions = { printOnJoin: false },
     ) {}
 
     public getStatus(): TikTokStatus {
@@ -210,6 +211,7 @@ export class TikTokAdapter {
         conn.on(WebcastEvent.GIFT, safe('gift', (d) => this.onGift(d)));
         conn.on(WebcastEvent.LIKE, safe('like', (d) => this.onLike(d)));
         conn.on(WebcastEvent.SHARE, safe('share', (d) => this.onShare(d)));
+        conn.on(WebcastEvent.MEMBER, safe('join', (d) => this.onJoin(d)));
 
         conn.on(ControlEvent.DISCONNECTED, () => {
             if (!current()) return;
@@ -290,6 +292,13 @@ export class TikTokAdapter {
         this.handler.handle({ type: 'SHARE', ...user, avatarUrl: extractAvatarUrl(data) });
     }
 
+    private onJoin(data: Loose): void {
+        if (!this.interactions.printOnJoin || Number(data.action ?? 1) !== 1) return;
+        const user = extractUser(data);
+        if (!user.userId || user.userId === 'anonymous' || this.duplicateInteraction('join', data)) return;
+        this.handler.handle({ type: 'JOIN', ...user, avatarUrl: extractAvatarUrl(data) });
+    }
+
     /** Combo: TikTok gửi lại cùng quà với repeatCount cộng dồn -> gộp thành MỘT vé với tổng, in khi combo kết thúc. */
     private onGift(data: Loose): void {
         const gift = extractGift(data);
@@ -342,11 +351,12 @@ export class TikTokAdapter {
     }
 
     /** Dùng để thử khi chưa live: đưa dữ liệu thô (đúng dạng TikTok) vào đúng đường xử lý thật. */
-    public simulate(kind: 'chat' | 'follow' | 'gift' | 'like' | 'share', data: Loose): void {
+    public simulate(kind: 'chat' | 'follow' | 'gift' | 'like' | 'share' | 'join', data: Loose): void {
         if (kind === 'chat') this.onChat(data);
         else if (kind === 'follow') this.onFollow(data);
         else if (kind === 'like') this.onLike(data);
         else if (kind === 'share') this.onShare(data);
+        else if (kind === 'join') this.onJoin(data);
         else this.onGift(data);
     }
 

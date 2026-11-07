@@ -135,6 +135,16 @@ export const createRouter = (core: Core): Router => {
         }
     });
 
+    router.get('/config/join', (_req, res) => res.json(config.interactions));
+    router.put('/config/join', (req, res) => {
+        if (!isRecord(req.body) || typeof req.body['printOnJoin'] !== 'boolean') {
+            throw new HttpError(400, 'printOnJoin phải là boolean');
+        }
+        config.interactions.printOnJoin = req.body['printOnJoin'];
+        saveSettings({ printOnJoin: config.interactions.printOnJoin });
+        res.json(config.interactions);
+    });
+
     // --- Cấu hình ngưỡng quà (đổi nóng, lưu file) ---
     router.get('/config/gift', (_req, res) => {
         res.json(config.gift);
@@ -272,7 +282,7 @@ export const createRouter = (core: Core): Router => {
 
     router.post('/audio/select', (req, res) => {
         const index: unknown = isRecord(req.body) ? req.body['index'] : undefined;
-        if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= 6) {
+        if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= 7) {
             throw new HttpError(400, 'Bài nhạc không hợp lệ');
         }
         const audio = { ...getAudioConfig(), bgmEnabled: true };
@@ -313,7 +323,7 @@ export const createRouter = (core: Core): Router => {
     router.post('/dev/tiktok/simulate', (req, res) => {
         if (!isRecord(req.body)) throw new HttpError(400, 'Body phải là JSON object');
         const kind = req.body['kind'];
-        if (kind !== 'chat' && kind !== 'follow' && kind !== 'gift' && kind !== 'like' && kind !== 'share') throw new HttpError(400, 'kind phải là chat|follow|gift|like|share');
+        if (kind !== 'chat' && kind !== 'follow' && kind !== 'gift' && kind !== 'like' && kind !== 'share' && kind !== 'join') throw new HttpError(400, 'kind phải là chat|follow|gift|like|share|join');
         const id = str(req.body, 'uniqueId', true) as string;
         const avatarUrl = str(req.body, 'avatarUrl', false);
         const data: Record<string, unknown> = {

@@ -1,5 +1,10 @@
 # Thư mục Nhạc nền Livestream (BGM)
 
+Bài chính (đầu playlist): `emin-jony-kamin-1h.m4a` — Emin feat. JONY – Камин,
+bản 1:01:40 từ https://www.youtube.com/watch?v=GKq4xSiV6sw.
+Giữ luồng audio AAC/M4A gốc, không tải video. File chỉ lưu trên máy và được gitignore.
+Danh sách trong `SoundManager.ts`; dropdown admin dùng cùng danh sách.
+
 Để máy in tự động phát nhạc nền khi livestream, bạn chỉ cần tải các bài nhạc `.mp3` và đặt vào thư mục này với các tên sau:
 
 - **`lofi-1.mp3`**

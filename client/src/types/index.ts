@@ -1,4 +1,4 @@
-export type EventType = 'COMMENT' | 'FOLLOW' | 'LIKE' | 'SHARE' | 'GIFT';
+export type EventType = 'COMMENT' | 'FOLLOW' | 'LIKE' | 'SHARE' | 'JOIN' | 'GIFT';
 
 export interface ViewerEvent {
     id: string;

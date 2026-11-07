@@ -83,6 +83,9 @@ export function AdminView() {
     const [full, setFull] = useState(30);
     const [giftMsg, setGiftMsg] = useState('');
     const [speed, setSpeed] = useState(1);
+    const [printOnJoin, setPrintOnJoin] = useState(false);
+    const [joinLoaded, setJoinLoaded] = useState(false);
+    const [savingJoin, setSavingJoin] = useState(false);
 
     const [bgmPlaying, setBgmPlaying] = useState(soundManager.getBgmPlaying());
     const [selectingTrack, setSelectingTrack] = useState(false);
@@ -120,6 +123,11 @@ export function AdminView() {
         const fail = (e: unknown) =>
             setLoadError(`Chưa tải được cài đặt từ server (${e instanceof Error ? e.message : 'lỗi'}). Đang thử lại khi kết nối lại…`);
         setLoadError('');
+        setJoinLoaded(false);
+        api.getJoinConfig().then((settings) => {
+            setPrintOnJoin(settings.printOnJoin);
+            setJoinLoaded(true);
+        }).catch(fail);
 
         api.getGiftConfig().then((c) => {
             setGold(c.goldDiamonds);
@@ -249,6 +257,22 @@ export function AdminView() {
 
                 <section style={card}>
                     <h2 style={{ margin: 0, fontSize: 16 }}>TikTok LIVE</h2>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                        <input type="checkbox" checked={printOnJoin} disabled={!isConnected || !joinLoaded || savingJoin}
+                            onChange={async (e) => {
+                                const enabled = e.target.checked;
+                                setSavingJoin(true);
+                                try {
+                                    const settings = await api.setJoinConfig(enabled);
+                                    setPrintOnJoin(settings.printOnJoin);
+                                    setActionMsg(enabled ? 'Đã bật in ảnh khi người xem vào LIVE' : 'Đã tắt in ảnh khi người xem vào LIVE');
+                                } catch (error) {
+                                    setActionMsg(`⚠️ ${error instanceof Error ? error.message : 'Lỗi lưu cài đặt'}`);
+                                } finally { setSavingJoin(false); }
+                            }} />
+                        In ảnh khi người xem vừa vào LIVE
+                    </label>
+                    <div style={{ fontSize: 12, color: '#94a3b8' }}>Lưu và áp dụng ngay cho người vào sau đó. Tắt: giữ cách in hiện tại.</div>
                     <div style={{ color, fontWeight: 700 }}>
                         ● {label}
                         {tiktokStatus?.username ? ` @${tiktokStatus.username}` : ''}
@@ -531,6 +555,8 @@ export function AdminView() {
                         <button style={btn('#7c3aed')} onClick={() => run(sim({ kind: 'chat', uniqueId: rid() }))}>Chat</button>
                         <button style={btn('#7c3aed')} onClick={() => run((async () => { const id = rid(); for (let i = 0; i < 5; i++) await sim({ kind: 'chat', uniqueId: id }); })())}>5 bình luận</button>
                         <button style={btn('#7c3aed')} onClick={() => run(sim({ kind: 'follow', uniqueId: rid() }))}>Follow</button>
+                        <button style={btn('#0f766e')} disabled={!printOnJoin} title="Bật in ảnh khi vào LIVE để thử"
+                            onClick={() => run(sim({ kind: 'join', uniqueId: rid() }))}>👋 Vào LIVE</button>
                         <button style={btn('#e11d48')} onClick={() => run(sim({ kind: 'like', uniqueId: rid(), likeCount: 10 }))}>❤️ 10 tim</button>
                         <button style={btn('#e11d48')} onClick={() => run((async () => { const id = rid(); await sim({ kind: 'like', uniqueId: id, likeCount: 50 }); await sim({ kind: 'like', uniqueId: id, likeCount: 30 }); })())}>❤️ 50 + 30 tim</button>
                         <button style={btn('#0284c7')} onClick={() => run(sim({ kind: 'share', uniqueId: rid() }))}>↗️ Chia sẻ</button>

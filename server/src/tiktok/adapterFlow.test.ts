@@ -4,6 +4,45 @@ import { createCore } from '../app.js';
 import { config } from '../config.js';
 
 const user = (id: string) => ({ userId: `u-${id}`, uniqueId: id, nickname: id });
+
+test('công tắc vào LIVE: mặc định tắt, bật áp dụng ngay, đúng tên/ảnh; tắt không tạo lượt mới', () => {
+    const interactions = { printOnJoin: false };
+    const core = createCore({ ...config, interactions });
+    core.engine.pause();
+    const data = {
+        user: { ...user('joiner'), nickname: 'Minh Anh', avatarThumb: { urlList: ['https://p16.tiktokcdn.com/join.jpg'] } },
+        action: 1, common: { msgId: 'join-1' },
+    };
+    core.tiktok.simulate('join', data);
+    assert.equal(core.queue.freeSize, 0);
+    interactions.printOnJoin = true;
+    core.tiktok.simulate('join', data);
+    core.tiktok.simulate('join', data); // trùng gói tin không in hai lần
+    assert.equal(core.queue.freeSize, 1);
+    const job = core.queue.snapshot().pendingFree[0]!;
+    assert.equal(job.source, 'JOIN');
+    assert.equal(job.username, 'Minh Anh');
+    assert.equal(job.avatarUrl, 'https://p16.tiktokcdn.com/join.jpg');
+    assert.equal(job.frame, 'normal');
+    core.tiktok.simulate('join', { ...data, action: 3, common: { msgId: 'subscribed' } });
+    core.tiktok.simulate('join', { action: 1 });
+    assert.equal(core.queue.freeSize, 1);
+    interactions.printOnJoin = false;
+    core.tiktok.simulate('join', { ...data, common: { msgId: 'join-2' } });
+    assert.equal(core.queue.freeSize, 1);
+    core.tiktok.simulate('share', { user: user('other') });
+    assert.equal(core.queue.freeSize, 2);
+});
+
+test('lượt vào LIVE tuân theo giới hạn queue thường, không chặn quà', () => {
+    const core = createCore({ ...config, interactions: { printOnJoin: true }, queue: { ...config.queue, maxFree: 1 } });
+    core.engine.pause();
+    core.tiktok.simulate('join', { user: user('a'), action: 1 });
+    core.tiktok.simulate('join', { user: user('b'), action: 1 });
+    assert.equal(core.queue.freeSize, 1);
+    core.tiktok.simulate('gift', { user: user('b'), giftId: 5655, giftType: 0, diamondCount: 1 });
+    assert.equal(core.queue.snapshot().pendingPriority.length, 1);
+});
 const giftData = (id: string, repeatCount: number, repeatEnd = false) => ({
     user: user(id),
     giftId: 5655,

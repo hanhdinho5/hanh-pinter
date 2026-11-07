@@ -33,6 +33,7 @@ export const getAudioConfig = (): AudioSettings => {
 
 export interface PersistedSettings {
     tiktokUser?: string;
+    printOnJoin?: boolean;
     goldDiamonds?: number;
     fullPageDiamonds?: number;
     background?: BackgroundSettings;
