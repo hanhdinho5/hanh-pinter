@@ -171,11 +171,15 @@ export class PrinterWorkshopScene {
         this.setupEnvironment();
 
         // 7. Tờ giấy in (Sheet Renderer)
-        this.sheetRenderer = new SheetCanvasRenderer(1024, 1536);
+        // Tờ chính: texture 2048x3072 để giữ chi tiết khi xuất nguồn 1080x1920.
+        this.sheetRenderer = new SheetCanvasRenderer(1024, 1536, 2);
+        this.sheetRenderer.texture.anisotropy = Math.min(16, this.renderer.capabilities.getMaxAnisotropy());
         this.sheetRenderer.renderSheet(mockPartialSheet);
         this.paperMesh = this.createPaperMesh(this.sheetRenderer);
         this.scene.add(this.paperMesh);
-        this.underRenderer = new SheetCanvasRenderer(1024, 1536);
+        // Tờ nằm dưới ít chi tiết, không cần texture lớn bằng tờ đang in.
+        this.underRenderer = new SheetCanvasRenderer(1024, 1536, 1);
+        this.underRenderer.texture.anisotropy = Math.min(16, this.renderer.capabilities.getMaxAnisotropy());
         this.underPaperMesh = this.createPaperMesh(this.underRenderer);
         this.underPaperMesh.position.y = -0.006; // ngay dưới tờ trên, không bị chồng hình
         this.scene.add(this.underPaperMesh);

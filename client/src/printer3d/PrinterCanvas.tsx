@@ -189,8 +189,8 @@ function ActionBadges({ frameWidth }: { frameWidth: number }) {
         { icon: '💬', title: 'Bình luận', sub: 'In ảnh', color: '#7dd3fc' },
         { icon: '➕', title: 'Follow', sub: 'In ảnh', color: '#86efac' },
         { icon: '🌹', title: '', sub: 'In khung', color: '#fda4af' },
-        { icon: '', giftIcon: 'pig', title: '', sub: 'Khung vàng', color: '#fcd34d' },
-        { icon: '', giftIcon: 'donut', title: '', sub: 'Khung VIP', color: '#f0abfc' },
+        { icon: '', giftIcon: 'pig', title: '', sub: 'Khung to vàng', color: '#fcd34d' },
+        { icon: '', giftIcon: 'donut', title: '', sub: 'Khung to VIP', color: '#f0abfc' },
     ];
     // Thu gọn dải hướng dẫn, vẫn tăng theo kích thước nguồn overlay.
     const fontSize = Math.max(7, Math.min(18, frameWidth * 0.017));

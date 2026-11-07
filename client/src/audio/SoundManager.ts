@@ -596,6 +596,19 @@ class SoundManager {
         this.playNextBgmTrack();
     }
 
+    public getBgmPlaylist(): readonly string[] {
+        return [...this.bgmPlaylist];
+    }
+
+    public selectBgmTrack(index: number): void {
+        if (!Number.isInteger(index) || index < 0 || index >= this.bgmPlaylist.length) return;
+        this.stopBgm();
+        // Chọn lại bài hiện tại cũng phát từ đầu.
+        this.bgmAudio?.removeAttribute('src');
+        this.currentBgmIndex = index;
+        this.startBgm();
+    }
+
     public getCurrentTrackName(): string {
         if (this.bgmPlaylist.length === 0) return 'None';
         const url = this.bgmPlaylist[this.currentBgmIndex] || '';

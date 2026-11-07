@@ -54,6 +54,9 @@ export function OverlayView() {
         onAudioNext: () => {
             if (soundManager.isBgmWanted()) soundManager.nextTrack();
         },
+        onAudioSelect: (index) => {
+            if (urlAudio.current.get('bgm') !== '0') soundManager.selectBgmTrack(index);
+        },
         // Nhạc nền / tắt tiếng / âm lượng điều khiển từ trang Admin
         onAudioSync: (cfg) => {
             const params = urlAudio.current;

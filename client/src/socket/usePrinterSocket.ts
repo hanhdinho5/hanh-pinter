@@ -21,6 +21,7 @@ export interface UsePrinterSocketOptions {
     /** Mặc định chỉ áp âm lượng; overlay truyền vào để áp cả bật nhạc / tắt tiếng */
     onAudioSync?: (config: AudioConfig) => void;
     onAudioNext?: () => void;
+    onAudioSelect?: (index: number) => void;
     /** Gọi mỗi lần (re)connect tới server, trước khi nhận lại trạng thái */
     onConnect?: () => void;
 }
@@ -108,6 +109,7 @@ export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
             optionsRef.current.onAudioSync?.(cfg);
         };
         const onAudioNext = () => optionsRef.current.onAudioNext?.();
+        const onAudioSelect = (index: number) => optionsRef.current.onAudioSelect?.(index);
 
         socket.on('connect', onConnect);
         socket.on('disconnect', onDisconnect);
@@ -125,6 +127,7 @@ export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
         rawSocket.on('background:sync', onBackgroundSync);
         rawSocket.on('audio:sync', onAudioSync);
         rawSocket.on('audio:next', onAudioNext);
+        rawSocket.on('audio:select', onAudioSelect);
 
         if (socket.connected) {
             setIsConnected(true);
@@ -144,6 +147,7 @@ export function usePrinterSocket(options: UsePrinterSocketOptions = {}) {
             rawSocket.off('background:sync', onBackgroundSync);
             rawSocket.off('audio:sync', onAudioSync);
             rawSocket.off('audio:next', onAudioNext);
+            rawSocket.off('audio:select', onAudioSelect);
         };
     }, []);
 

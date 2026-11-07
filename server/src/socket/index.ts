@@ -17,6 +17,7 @@ const FORWARDED: (keyof RealtimeEventMap)[] = [
     'background:sync',
     'audio:sync',
     'audio:next',
+    'audio:select',
 ];
 
 export const createSocketServer = (httpServer: HttpServer, core: Core, origin: string) => {

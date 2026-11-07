@@ -35,6 +35,25 @@ const fresh = () => {
 };
 const latest = () => FakeAudio.instances.at(-1)!;
 
+test('select a playlist track, restart same track and ignore invalid selections', () => {
+    const manager = fresh();
+    try {
+        assert.equal(manager.getBgmPlaylist().length, 6);
+        manager.selectBgmTrack(2);
+        assert.match(manager.getCurrentTrackName(), /study-relax/);
+        latest().currentTime = 120;
+        manager.selectBgmTrack(2);
+        assert.equal(latest().currentTime, 0);
+        const count = FakeAudio.instances.length;
+        manager.selectBgmTrack(-1);
+        manager.selectBgmTrack(6);
+        manager.selectBgmTrack(1.5);
+        assert.equal(FakeAudio.instances.length, count);
+        latest().emit('ended');
+        assert.equal(manager.getCurrentTrackName(), 'lofi-1.mp3');
+    } finally { manager.stopBgm(); }
+});
+
 type PrintHarness = {
     loadPenBuffer: () => Promise<void>;
     startSynthesizedPrintSound: (gold: boolean) => void;

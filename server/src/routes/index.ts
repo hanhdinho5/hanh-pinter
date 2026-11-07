@@ -270,6 +270,18 @@ export const createRouter = (core: Core): Router => {
         res.json({ ok: true });
     });
 
+    router.post('/audio/select', (req, res) => {
+        const index: unknown = isRecord(req.body) ? req.body['index'] : undefined;
+        if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= 6) {
+            throw new HttpError(400, 'Bài nhạc không hợp lệ');
+        }
+        const audio = { ...getAudioConfig(), bgmEnabled: true };
+        saveSettings({ audio });
+        (core.bus as unknown as NodeJS.EventEmitter).emit('audio:select', index);
+        (core.bus as unknown as NodeJS.EventEmitter).emit('audio:sync', audio);
+        res.json({ ok: true });
+    });
+
     router.post('/printer/pause', (_req, res) => {
         engine.pause();
         res.json(engine.getState());

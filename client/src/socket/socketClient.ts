@@ -166,6 +166,14 @@ export const api = {
         const res = await fetch(`${serverUrl}/api/audio/next`, { method: 'POST' });
         if (!res.ok) throw new Error('Lỗi chuyển bài');
     },
+    async selectBgmTrack(index: number, serverUrl = DEFAULT_SERVER_URL) {
+        const res = await fetch(`${serverUrl}/api/audio/select`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ index }),
+        });
+        return parse(res);
+    },
     updateAudioRealtime(patch: Partial<AudioConfig>) {
         const socket = getSocket();
         if (socket?.connected) {

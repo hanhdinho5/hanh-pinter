@@ -117,5 +117,6 @@ export interface RealtimeEventMap {
     'audio:sync': [AudioConfig];
     /** Admin bấm "Bài kế": overlay chuyển bài nhạc nền */
     'audio:next': [];
+    'audio:select': [number];
 }
 

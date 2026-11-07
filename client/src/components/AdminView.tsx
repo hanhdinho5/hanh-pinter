@@ -58,6 +58,8 @@ const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export function AdminView() {
     const { isConnected, printerState, queueState, tiktokStatus, recentEvents, backgroundConfig } = usePrinterSocket({
+        onAudioSelect: (index) => setSelectedTrack(String(index)),
+        onAudioNext: () => setSelectedTrack(''),
         // Âm thanh đổi ở nơi khác (tab Admin khác / dashboard) -> hiển thị đúng
         onAudioSync: (a) => {
             setBgmPlaying(a.bgmEnabled);
@@ -83,6 +85,8 @@ export function AdminView() {
     const [speed, setSpeed] = useState(1);
 
     const [bgmPlaying, setBgmPlaying] = useState(soundManager.getBgmPlaying());
+    const [selectingTrack, setSelectingTrack] = useState(false);
+    const [selectedTrack, setSelectedTrack] = useState('');
     const [muted, setMuted] = useState(soundManager.isSoundMuted());
     const [bgmVol, setBgmVol] = useState(Math.round(soundManager.getBgmVolume() * 100));
     const [sfxVol, setSfxVol] = useState(Math.round(soundManager.getSfxVolume() * 100));
@@ -334,6 +338,29 @@ export function AdminView() {
                             ⏭️ Bài kế
                         </button>
                     </div>
+                    <label style={{ fontSize: 13 }}>
+                        Chọn bài nhạc
+                        <select value={selectedTrack} disabled={!isConnected || selectingTrack}
+                            style={{ ...input, width: '100%', marginTop: 6 }}
+                            onChange={async (e) => {
+                                const index = Number(e.target.value);
+                                const previous = selectedTrack;
+                                setSelectedTrack(String(index));
+                                setSelectingTrack(true);
+                                try {
+                                    await api.selectBgmTrack(index);
+                                    setActionMsg('Đã gửi bài đã chọn tới overlay');
+                                } catch (error) {
+                                    setSelectedTrack(previous);
+                                    setActionMsg(`⚠️ ${error instanceof Error ? error.message : 'Không chuyển được bài'}`);
+                                } finally { setSelectingTrack(false); }
+                            }}>
+                            <option value="" disabled>Chọn bài để phát từ đầu…</option>
+                            {soundManager.getBgmPlaylist().map((url, index) => (
+                                <option key={url} value={index}>{index + 1}. {url.split('/').pop()}</option>
+                            ))}
+                        </select>
+                    </label>
                     <label style={{ fontSize: 13 }}>
                         Âm lượng BGM: <b>{bgmVol}%</b>
                         <input

@@ -7,6 +7,7 @@ import { QuickBackgroundBar } from './components/QuickBackgroundBar';
 import { usePrinterSocket } from './socket/usePrinterSocket';
 import { api } from './socket/socketClient';
 import { mockPartialSheet } from './printer3d/mockData';
+import { soundManager } from './audio/SoundManager';
 import type { Sheet, SheetEntry, PrintJob } from './types';
 
 export function App() {
@@ -40,6 +41,10 @@ function DashboardView() {
 
     // 2. Kết nối Socket.IO thời gian thực với Server (:3001)
     const { isConnected, currentSheet, queueState, status, setStatus, tiktokStatus, backgroundConfig } = usePrinterSocket({
+        onAudioSelect: (index) => soundManager.selectBgmTrack(index),
+        onAudioNext: () => {
+            if (soundManager.isBgmWanted()) soundManager.nextTrack();
+        },
         onConnect: () => {
             resyncRef.current = true;
         },
