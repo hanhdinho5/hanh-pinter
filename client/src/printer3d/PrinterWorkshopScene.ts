@@ -114,9 +114,8 @@ export class PrinterWorkshopScene {
             alpha: true,
         });
         this.renderer.setClearColor(0x000000, 0);
-        // Mặc định theo màn hình (nhẹ máy khi vừa live vừa mã hoá stream). Muốn nét hơn: thêm ?quality=2
-        const q = Number(new URLSearchParams(window.location.search).get('quality'));
-        this.renderer.setPixelRatio(q > 0 ? Math.min(q, 3) : Math.min(window.devicePixelRatio || 1, 2));
+        // Render dư độ phân giải có giới hạn; vẫn cho phép chủ động chọn ?quality=1 hoặc 2.
+        this.updateRenderResolution(container.clientWidth, container.clientHeight);
         this.renderer.setSize(Math.max(1, container.clientWidth), Math.max(1, container.clientHeight), false);
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -432,22 +431,18 @@ export class PrinterWorkshopScene {
         }
         geo.computeVertexNormals();
 
-        // Giấy tự phát sáng một phần theo chính texture -> trắng sáng, chữ/ảnh rõ, không bị xám đục vì tone mapping
-        const mat = new THREE.MeshStandardMaterial({
+        // Bản in giữ màu trực tiếp từ canvas, không bị đèn cộng sáng làm bạc ảnh/chữ.
+        // Độ cong và phối cảnh của giấy vẫn do hình học 3D đảm nhiệm.
+        const mat = new THREE.MeshBasicMaterial({
             map: renderer.texture,
-            emissive: 0xffffff,
-            emissiveMap: renderer.texture,
-            emissiveIntensity: 0.55,
-            color: 0xb8b8b8,
-            roughness: 0.92,
-            metalness: 0,
+            color: 0xffffff,
             side: THREE.DoubleSide,
             toneMapped: false,
         });
 
         const paperMesh = new THREE.Mesh(geo, mat);
         paperMesh.position.set(0, 0, 0.85);
-        paperMesh.receiveShadow = true;
+        paperMesh.receiveShadow = false;
 
         return paperMesh;
     }
@@ -1030,6 +1025,21 @@ export class PrinterWorkshopScene {
         this.birdFlockSystem.triggerFlockFlight();
     }
 
+    private updateRenderResolution(width: number, height: number): void {
+        const requested = Number(new URLSearchParams(window.location.search).get('quality'));
+        const automatic = Math.min(
+            2,
+            Math.max(window.devicePixelRatio || 1, 1.5),
+            Math.sqrt(4_000_000 / Math.max(1, width * height)),
+        );
+        const ratio = Number.isFinite(requested) && requested > 0
+            ? Math.min(requested, 3)
+            : Math.max(0.5, automatic);
+        if (Math.abs(this.renderer.getPixelRatio() - ratio) > 0.001) {
+            this.renderer.setPixelRatio(ratio);
+        }
+    }
+
     public onWindowResize(): void {
         if (!this.container) return;
         const width = this.container.clientWidth;
@@ -1039,6 +1049,7 @@ export class PrinterWorkshopScene {
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
 
+        this.updateRenderResolution(width, height);
         this.renderer.setSize(width, height, false);
     }
 

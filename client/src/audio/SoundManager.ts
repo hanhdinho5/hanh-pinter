@@ -62,6 +62,7 @@ class SoundManager {
     constructor() {
         // Khởi tạo danh sách file nhạc nền (gồm 3 bản Chill dài 8 tiếng + các bài mẫu)
         this.bgmPlaylist = [
+            '/music/relaxing-piano-water-3h.m4a',
             '/music/emin-jony-kamin-1h.m4a',
             '/music/lofi-piano-water-2h.mp3',
             '/music/lofi-chill-beats-3h.mp3',

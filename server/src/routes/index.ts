@@ -282,7 +282,7 @@ export const createRouter = (core: Core): Router => {
 
     router.post('/audio/select', (req, res) => {
         const index: unknown = isRecord(req.body) ? req.body['index'] : undefined;
-        if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= 7) {
+        if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= 8) {
             throw new HttpError(400, 'Bài nhạc không hợp lệ');
         }
         const audio = { ...getAudioConfig(), bgmEnabled: true };

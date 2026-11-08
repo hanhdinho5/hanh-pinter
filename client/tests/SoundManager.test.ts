@@ -38,11 +38,12 @@ const latest = () => FakeAudio.instances.at(-1)!;
 test('select a playlist track, restart same track and ignore invalid selections', () => {
     const manager = fresh();
     try {
-        assert.equal(manager.getBgmPlaylist()[0], '/music/emin-jony-kamin-1h.m4a');
-        manager.selectBgmTrack(3);
+        assert.equal(manager.getBgmPlaylist()[0], '/music/relaxing-piano-water-3h.m4a');
+        const selected = manager.getBgmPlaylist().indexOf('/music/lofi-study-relax-3h.mp3');
+        manager.selectBgmTrack(selected);
         assert.match(manager.getCurrentTrackName(), /study-relax/);
         latest().currentTime = 120;
-        manager.selectBgmTrack(3);
+        manager.selectBgmTrack(selected);
         assert.equal(latest().currentTime, 0);
         const count = FakeAudio.instances.length;
         manager.selectBgmTrack(-1);

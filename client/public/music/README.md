@@ -1,6 +1,11 @@
 # Thư mục Nhạc nền Livestream (BGM)
 
-Bài chính (đầu playlist): `emin-jony-kamin-1h.m4a` — Emin feat. JONY – Камин,
+Bài chính (đầu playlist): `relaxing-piano-water-3h.m4a` — Soothing Relaxation:
+Relaxing Piano Music & Water Sounds for Sleep, Meditation, Spa & Yoga, dài 3:02:03,
+từ https://www.youtube.com/watch?v=77ZozI0rw7w. Chỉ tải âm thanh AAC/M4A,
+chuẩn hóa container không nén lại; file giữ trên máy, được gitignore.
+
+Bài thứ hai: `emin-jony-kamin-1h.m4a` — Emin feat. JONY – Камин,
 bản 1:01:40 từ https://www.youtube.com/watch?v=GKq4xSiV6sw.
 Giữ luồng audio AAC/M4A gốc, không tải video. File chỉ lưu trên máy và được gitignore.
 Danh sách trong `SoundManager.ts`; dropdown admin dùng cùng danh sách.

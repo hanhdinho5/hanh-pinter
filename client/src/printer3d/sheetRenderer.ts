@@ -628,17 +628,22 @@ export class SheetCanvasRenderer {
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
         ctx.clip();
         if (img) {
+            ctx.imageSmoothingEnabled = true;
             ctx.imageSmoothingQuality = 'high';
-            ctx.drawImage(img, cx - r, cy - r, r * 2, r * 2);
+            // Cắt vuông ở giữa ảnh nguồn thay vì kéo méo ảnh dọc/ngang thành hình vuông.
+            const side = Math.min(img.naturalWidth, img.naturalHeight);
+            ctx.drawImage(img,
+                (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side,
+                cx - r, cy - r, r * 2, r * 2);
         } else {
             // Đang tải ảnh: nền màu nhạt theo tên
             const hue = this.hue(entry.username);
             ctx.fillStyle = `hsl(${hue}, 70%, 88%)`;
             ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
         }
-        // Ánh sáng bóng nhẹ phía trên như ảnh in bóng
+        // Giữ chút bóng giấy ảnh, tránh phủ trắng làm mất tương phản khuôn mặt.
         const shine = ctx.createLinearGradient(cx, cy - r, cx, cy);
-        shine.addColorStop(0, 'rgba(255,255,255,0.18)');
+        shine.addColorStop(0, 'rgba(255,255,255,0.035)');
         shine.addColorStop(1, 'rgba(255,255,255,0)');
         ctx.fillStyle = shine;
         ctx.fillRect(cx - r, cy - r, r * 2, r);
@@ -1029,10 +1034,10 @@ export class SheetCanvasRenderer {
         ctx.lineJoin = 'round';
         ctx.miterLimit = 2;
 
-        // 1. Viền trắng dày + bóng mềm tách chữ khỏi nền
-        ctx.shadowColor = 'rgba(15, 23, 42, 0.28)';
-        ctx.shadowBlur = 8;
-        ctx.shadowOffsetY = 4;
+        // 1. Viền trắng gọn, bóng sát nét để chữ không có quầng mờ khi lên LIVE.
+        ctx.shadowColor = 'rgba(15, 23, 42, 0.18)';
+        ctx.shadowBlur = 2;
+        ctx.shadowOffsetY = 1;
         ctx.lineWidth = size * 0.26;
         ctx.strokeStyle = '#ffffff';
         ctx.strokeText(name, cx, y);
